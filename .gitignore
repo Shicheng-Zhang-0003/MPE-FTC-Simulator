@@ -1,0 +1,56 @@
+# ============================================================
+# MPE root .gitignore
+# Repo root contains: v15R2/  fixes/  run_all.sh  verify.sh
+# ============================================================
+
+# ============ Build output (matches anywhere in tree) ============
+*.o
+*.d
+*.obj
+*.a
+*.so
+*.exe
+engine
+build/
+
+# ============ Fix-script backups ============
+# Every fix script creates .pre_NNN backups before mutating
+*.pre_*
+
+# ============ Backup / scratch files ============
+*.bak
+*.bak_*
+*.orig
+*.rej
+*~
+
+# ============ Editor swap files ============
+*.swp
+*.swo
+.*.swp
+
+# ============ Editors / IDEs ============
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+compile_commands.json
+.cache/
+
+# ============ OS cruft ============
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============ Runtime state (engine writes at startup) ============
+# status/ dirs contain engine.cfg, scene.dat — regenerated
+status/
+
+# ============ Logs ============
+# fix_log.txt IS tracked (execution history). Only stray logs ignored.
+!v15R2/v03_gate_validation.log
+*.log
+
+# ============ Sanitizer / temp build artifacts ============
+/tmp/
+*.san

@@ -1,0 +1,24 @@
+/* MPE_FTC_055: Real physics world — pure simulation state. No camera/input/UI. */
+#ifndef physics_world_h
+#define physics_world_h
+
+#include "rigidbody.h"
+#include <stdint.h>
+
+typedef struct {
+    rigidbody *bodies;
+    int body_count;
+    int body_capacity;
+    uint32_t next_object_id;
+} physics_world;
+
+void physics_world_init(physics_world *world);
+void physics_world_cleanup(physics_world *world);
+int physics_world_add_sphere(physics_world *world, float radius, float mass, vector3 position);
+int physics_world_add_cube(physics_world *world, vector3 position, vector3 half_extensions, float mass);
+int physics_world_add_cylinder(physics_world *world, float radius, float half_length, float mass, vector3 position); /* MPE_FTC_090 *//
+void physics_world_clear(physics_world *world);
+void physics_world_step(physics_world *world, float dt);
+physics_world *physics_world_get_primary(void);
+
+#endif
