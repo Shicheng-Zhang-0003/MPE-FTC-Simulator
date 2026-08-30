@@ -88,6 +88,7 @@ gboolean physics_step_increment(gpointer user_data_pointer);
 
 float open_numerical_input_dialog(GtkWidget *parent, const char *title, float current_value);
 void editor_reset(void); /* MPE_TASK_V15R2_FIX */
+bool editor_dialog_is_active(void); /* MFS_PHASE_A */
 
 extern int debug_last_object_count;
 extern int debug_last_broadphase_pair_count;
