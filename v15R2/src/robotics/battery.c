@@ -6,8 +6,8 @@ void battery_init(battery *b) {
         return;
     }
     b->nominal_voltage = 12.8f;
-    b->internal_resistance = 0.05f;
-    b->capacity_ah = 3.0f;
+    b->internal_resistance = 0.015f; /* FIX 112: realistic LiPo internal resistance */
+    b->capacity_ah = 30.0f; /* FIX 110: realistic FTC battery capacity (30Ah) */ /* FIX 109: realistic FTC battery capacity */
     b->charge_fraction = 1.0f;
 }
 

@@ -66,7 +66,7 @@ void motor_update(motor *m, float wheel_angular_vel, float dt, float battery_vol
     m->torque = m->kt * m->current * m->efficiency;
 
     /* Output torque at wheel (after gearing) */
-    m->output_torque = m->torque * m->gear_ratio;
+    m->output_torque = m->torque;
 
     /* Speed tracking */
     m->rpm = fabsf(wheel_angular_vel) / MOTOR_RPM_TO_RAD_S;

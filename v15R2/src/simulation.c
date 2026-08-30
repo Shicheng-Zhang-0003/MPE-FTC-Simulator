@@ -91,18 +91,9 @@ gboolean physics_step_increment(gpointer user_data_pointer) {
     /* THE PHYSICS LOOP */
     simulation_physics_tick(frame_delta_time);
 
-    /* MFS_GUI_BRIDGE_TICK: Robot drive + physics */
+    /* MFS_GUI_BRIDGE_TICK: Robot physics tick only.
+       Drive input is handled in simulation_input_dispatch.c (G/V/B/N/C/H). */
     if (gui_robot_get_count() > 0) {
-        float kb_forward = 0.0f, kb_strafe = 0.0f, kb_rotate = 0.0f;
-        if (main_inputs.w_key_pressed) { kb_forward += 1.0f; }
-        if (main_inputs.s_key_pressed) { kb_forward -= 1.0f; }
-        if (main_inputs.a_key_pressed) { kb_strafe -= 1.0f; }
-        if (main_inputs.d_key_pressed) { kb_strafe += 1.0f; }
-        if (main_inputs.e_key_pressed) { kb_rotate += 1.0f; }
-        if (main_inputs.q_key_pressed) { kb_rotate -= 1.0f; }
-        if ((kb_forward != 0.0f) || (kb_strafe != 0.0f) || (kb_rotate != 0.0f)) {
-            gui_robot_apply_drive(kb_forward, kb_strafe, kb_rotate);
-        }
         gui_robot_tick(frame_delta_time);
     }
     /* MFS_GUI_BRIDGE_TICK_END */

@@ -32,7 +32,7 @@ void simulation_input_dispatch(GtkWidget *parent_window) {
                 main_inputs.object_menu_level = 1;
             }
         }
-        main_inputs.e_key_pressed = false;
+        main_inputs.h_key_pressed = false;
         config_menu_close();
     }
     if (main_inputs.f_key_pressed) {
@@ -104,22 +104,23 @@ void simulation_input_dispatch(GtkWidget *parent_window) {
         main_inputs.config_torture_pressed = false;
     }
 
-    /* Robot drive keys: G=forward, B=backward, V=left, N=right */
+    /* Robot drive keys: G=forward, B=backward, V=strafe, N=strafe, C=rotate LEFT, H=rotate RIGHT */
     if (gui_robot_get_count() > 0) {
         float kb_forward = 0.0f, kb_strafe = 0.0f, kb_rotate = 0.0f;
-        if (main_inputs.g_key_pressed) kb_forward += 1.0f;
-        if (main_inputs.b_key_pressed) kb_forward -= 1.0f; /* B=backward */
-        if (main_inputs.v_key_pressed) kb_strafe -= 1.0f; /* V=strafe left */
-        if (main_inputs.n_key_pressed) kb_strafe += 1.0f;
-        if (main_inputs.e_key_pressed) kb_rotate += 1.0f;
-        if (main_inputs.q_key_pressed) kb_rotate -= 1.0f;
-        if (kb_forward != 0.0f || kb_strafe != 0.0f || kb_rotate != 0.0f) {
-            gui_robot_apply_drive(kb_forward, kb_strafe, kb_rotate);
-            main_inputs.g_key_pressed = false;
-            main_inputs.v_key_pressed = false;
-            main_inputs.b_key_pressed = false;
-            main_inputs.n_key_pressed = false;
-        }
+        if (main_inputs.g_key_pressed) { kb_forward += 1.0f; }
+        if (main_inputs.b_key_pressed) { kb_forward -= 1.0f; }
+        if (main_inputs.v_key_pressed) { kb_strafe  += 1.0f; }
+        if (main_inputs.n_key_pressed) { kb_strafe  -= 1.0f; }
+        if (main_inputs.c_key_pressed) { kb_rotate  += 1.0f; } /* FIX 113: C=rotate left */
+        if (main_inputs.h_key_pressed) { kb_rotate  -= 1.0f; } /* FIX 113: H=rotate right */
+        /* ALWAYS apply drive — zeros motors when no keys pressed */
+        gui_robot_apply_drive(kb_forward, kb_strafe, kb_rotate);
+        main_inputs.g_key_pressed = false;
+        main_inputs.v_key_pressed = false;
+        main_inputs.b_key_pressed = false;
+        main_inputs.n_key_pressed = false;
+        main_inputs.c_key_pressed = false;
+        main_inputs.h_key_pressed = false;
     }
 
 /* Spawn gun (Enter hold) */
