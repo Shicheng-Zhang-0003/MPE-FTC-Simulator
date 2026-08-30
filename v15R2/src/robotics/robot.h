@@ -30,6 +30,8 @@ typedef struct {
 } ftc_robot;
 
 /* Create a 4-wheel robot at the given position. Returns 0 on success. */
+/* MPE_FTC_095: chassis-centre height where wheels rest on the floor */
+float ftc_robot_rest_height(void);
 int ftc_robot_create(physics_world *world, ftc_robot *robot, float x, float y, float z, motor_preset_id preset);
 
 /* Update all motors for one tick. Reads wheel angular velocity,

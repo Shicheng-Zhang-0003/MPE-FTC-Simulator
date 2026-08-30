@@ -180,9 +180,11 @@ void physics_world_step(physics_world *world, float dt) {
         for (int m = 0; m < manifold_count; m++) {
             collision_resolve_iterative(&world_manifolds[m]);
         }
+        /* MFS_SOLVER_FIX: solve joints inside the iteration loop so friction
+         * impulses properly transfer through revolute constraints to the chassis */
+        constraint_solve_all(world->bodies, world->body_count, dt);
     }
     contact_cache_save(world_manifolds, manifold_count);
-    constraint_solve_all(world->bodies, world->body_count, dt); /* MPE_FTC_067 */
 
     for (int i = 0; i < world->body_count; i++) {
         rb_integrate_position(&world->bodies[i], dt);

@@ -62,42 +62,10 @@ void drivetrain_mecanum (ftc_robot *robot, float forward, float strafe, float ro
     /* Set motor commands (forward component uses wheel traction) */
     ftc_robot_set_wheel_commands (robot, wheel_targets, 4);
 
-    /* MPE_FTC_082 TEMPORARY — replace with anisotropic friction (MPE_FTC_095): Compute direct chassis force for strafe + rotate.
-     * Local space: X = lateral (strafe), Y = up, Z = forward.
-     * Force scale: tuned so full input ≈ 80 N, enough to move an 8 kg
-     * chassis at ~0.5 m/s² against friction. */
-    const float force_scale = 80.0f;   /* N per unit input */
-    const float torque_scale = 8.0f;   /* N·m per unit input */
-    robot->mecanum_chassis_force = (vector3) {
-        strafe * force_scale,
-        0.0f,
-        forward * force_scale * 0.5f   /* forward partly via wheels */
-    };
-    robot->mecanum_chassis_torque = rotate * torque_scale;
-    robot->mecanum_active = true;
 }
 
 void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
     if ((!world) || (!robot) || (dt <= 0.0f)) {return;}
     ftc_robot_update (world, robot, dt);
 
-    /* MPE_FTC_082 TEMPORARY — replace with anisotropic friction (MPE_FTC_095): Apply mecanum chassis forces after motor update */
-    if (robot->mecanum_active) {
-        int idx = robot->chassis_body;
-        if ((idx >= 0) && (idx < world->body_count)) {
-            rigidbody *chassis = &world->bodies [idx];
-            /* Transform local force to world space using chassis orientation */
-            vector3 world_force = vector4_rotate_to_vector3 (
-                chassis->orientation, robot->mecanum_chassis_force);
-            rb_apply_forces_perfect (chassis, world_force);
-            /* Yaw torque (around local Y axis) */
-            vector3 local_torque = {0.0f, robot->mecanum_chassis_torque, 0.0f};
-            vector3 world_torque = vector4_rotate_to_vector3 (
-                chassis->orientation, local_torque);
-            chassis->torque_accumulator = vector3_addition (
-                chassis->torque_accumulator, world_torque);
-            rigidbody_wake (chassis);
-        }
-        robot->mecanum_active = false;
-    }
 }

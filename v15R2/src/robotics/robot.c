@@ -12,9 +12,15 @@
 #define CHASSIS_MASS 8.0f /* ~18 lb robot */
 #define WHEEL_RADIUS 0.05f /* 100mm wheels */
 #define WHEEL_MASS 0.2f
+#define WHEEL_HALF_WIDTH 0.02f /* 40mm wide wheels */
 #define WHEEL_OFFSET_X 0.24f /* slightly outside chassis */
 #define WHEEL_OFFSET_Z 0.20f
 #define WHEEL_Y_OFFSET (-CHASSIS_HALF_Y - WHEEL_RADIUS + 0.01f)
+
+/* MPE_FTC_095: chassis-centre height where the wheels just touch floor y=0 */
+float ftc_robot_rest_height(void) {
+    return WHEEL_RADIUS - WHEEL_Y_OFFSET;
+}
 
 int ftc_robot_create(physics_world *world, ftc_robot *robot, float x, float y, float z, motor_preset_id preset) {
     if ((!world) || (!robot)) {
@@ -49,7 +55,7 @@ int ftc_robot_create(physics_world *world, ftc_robot *robot, float x, float y, f
     for (int i = 0; i < robot->wheel_count; i++) {
         /* Create wheel as a sphere (rolling approximation) */
         robot->wheel_bodies[i] =
-            physics_world_add_sphere(world, WHEEL_RADIUS, WHEEL_MASS,
+            physics_world_add_cylinder(world, WHEEL_RADIUS, WHEEL_HALF_WIDTH, WHEEL_MASS,
                                      (vector3){wheel_positions[i][0], wheel_positions[i][1], wheel_positions[i][2]});
         if (robot->wheel_bodies[i] < 0) {
             return 1;
@@ -67,6 +73,16 @@ int ftc_robot_create(physics_world *world, ftc_robot *robot, float x, float y, f
         if (robot->wheel_joints[i] < 0) {
             return 1;
         }
+
+        /* MFS_MECANUM_REAL: Mark wheel as mecanum with roller angle.
+         * Standard layout: front-left +45°, front-right -45°, back-left -45°, back-right +45° */
+        float roller_angle = 0.0f;
+        if (i == 0) roller_angle = 0.785398f;       /* front-left: +45° */
+        if (i == 1) roller_angle = -0.785398f;      /* front-right: -45° */
+        if (i == 2) roller_angle = -0.785398f;      /* back-left: -45° */
+        if (i == 3) roller_angle = 0.785398f;       /* back-right: +45° */
+        
+        rigidbody_set_mecanum(&world->bodies[robot->wheel_bodies[i]], true, roller_angle);
 
         /* Set up motor for this wheel */
         motor_preset_apply(&robot->wheel_motors[i], preset);

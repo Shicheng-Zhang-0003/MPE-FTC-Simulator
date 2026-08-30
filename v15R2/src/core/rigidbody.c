@@ -533,3 +533,12 @@ void rigidbody_initialisation_cylinder(rigidbody *rigid_body, float radius, floa
     rigid_body->force_accumulator = vector3_zero();
     rigid_body->torque_accumulator = vector3_zero();
 }
+
+/* MFS_MECANUM_FRICTION: mark a cylinder as a mecanum wheel with angled rollers */
+void rigidbody_set_mecanum(rigidbody *rb, bool enable, float roller_angle_rad) {
+    if (!rb) {
+        return;
+    }
+    rb->is_mecanum = enable;
+    rb->roller_angle_rad = roller_angle_rad;
+}

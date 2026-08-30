@@ -86,3 +86,23 @@ MATH3_INV_TEST_SOURCES = tests/math3_inverse_test.c core/physics_world.c core/ri
 test_math3_inverse: $(MATH3_INV_TEST_SOURCES)
 	$(CC) $(CFLAGS) -DMPE_MATH3_INVERSE_TEST $(MATH3_INV_TEST_SOURCES) -lm -o test_math3_inverse
 	./test_math3_inverse
+
+# MFS_FTC_INTEGRATION: full FTC robot integration test
+FTC_INTEGRATION_SOURCES := tests/ftc_integration_test.c core/physics_world.c core/rigidbody.c \
+	physics/collision_mechanics.c physics/broadphase.c physics/constraint.c physics/revolute_joint.c \
+	robotics/motor.c robotics/motor_presets.c robotics/battery.c robotics/robot.c robotics/drivetrain.c \
+	config/mpe_config.c config/mpe_config_schema.c
+
+test_ftc_integration:
+	$(CC) $(CFLAGS) -DMPE_FTC_INTEGRATION_TEST $(FTC_INTEGRATION_SOURCES) -lm -o test_ftc_integration
+	./test_ftc_integration
+
+# MFS_FTC_DEBUG: diagnostic test
+FTC_DEBUG_SOURCES := tests/ftc_debug_test.c core/physics_world.c core/rigidbody.c \
+	physics/collision_mechanics.c physics/broadphase.c physics/constraint.c physics/revolute_joint.c \
+	robotics/motor.c robotics/motor_presets.c robotics/battery.c robotics/robot.c robotics/drivetrain.c \
+	config/mpe_config.c config/mpe_config_schema.c
+
+test_ftc_debug:
+	$(CC) $(CFLAGS) -DMPE_FTC_DEBUG_TEST $(FTC_DEBUG_SOURCES) -lm -o test_ftc_debug
+	./test_ftc_debug

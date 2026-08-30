@@ -893,7 +893,70 @@ void collision_prepare_solver(collision_data *source, collision_data *m) {
 
         vector3 rel_vel_tangent = vector3_subtraction(rel_vel, vector3_scaling(m->normal_vector, vn_initial));
         float tangent_speed = vector3_length(rel_vel_tangent);
-        if (tangent_speed > 0.0001f) {
+        
+        /* MFS_MECANUM_FRICTION: for mecanum wheels, use roller-based tangent direction */
+        bool mecanum_tangent_set = false;
+        rigidbody *mecanum_wheel = NULL;
+        
+        if (m->object_a && m->object_a->is_mecanum) {
+            mecanum_wheel = m->object_a;
+        } else if (m->object_b && m->object_b->is_mecanum) {
+            mecanum_wheel = m->object_b;
+        }
+        
+        if (mecanum_wheel && mecanum_wheel->type == object_cylinder) {
+            /* Compute roller's free-slide direction in world space.
+             * Roller angle is measured from the axle (local X axis).
+             * For a wheel resting on the floor (y=0 plane), the roller direction
+             * projected onto the floor plane determines the free-slide direction.
+             * Friction grips perpendicular to that direction. */
+            
+            /* Get wheel's local axes in world space */
+            vector3 axle_world = mecanum_wheel->cached_axes[0]; /* local X = axle */
+            
+            /* Compute roller direction: rotate axle by roller_angle around the wheel's local Y axis
+             * (which points along the wheel's radius at the contact point).
+             * For simplicity, assume the wheel is upright (axle horizontal).
+             * The roller direction in the contact plane is perpendicular to the grip direction. */
+            
+            /* Floor normal is (0, 1, 0) or (0, -1, 0) depending on convention */
+            vector3 floor_normal = m->normal_vector;
+            if (vector3_length_squared(floor_normal) < 0.0001f) {
+                floor_normal = (vector3){0.0f, 1.0f, 0.0f};
+            }
+            
+            /* Project axle onto floor plane */
+            vector3 axle_proj = vector3_subtraction(
+                axle_world,
+                vector3_scaling(floor_normal, vector3_dot(axle_world, floor_normal))
+            );
+            float axle_proj_len = vector3_length(axle_proj);
+            if (axle_proj_len > 0.0001f) {
+                axle_proj = vector3_scaling(axle_proj, 1.0f / axle_proj_len);
+                
+                /* Roller direction is at roller_angle from axle, in the wheel's tangent plane.
+                 * For a mecanum wheel on the floor, the roller's free direction is:
+                 * cos(angle) * axle_proj + sin(angle) * (floor_normal × axle_proj)
+                 * The grip direction (friction tangent) is perpendicular to this. */
+                float cos_a = cosf(mecanum_wheel->roller_angle_rad);
+                float sin_a = sinf(mecanum_wheel->roller_angle_rad);
+                vector3 perp = vector3_cross(floor_normal, axle_proj);
+                vector3 roller_free = vector3_addition(
+                    vector3_scaling(axle_proj, cos_a),
+                    vector3_scaling(perp, sin_a)
+                );
+                
+                /* Grip direction is perpendicular to roller_free, still in the floor plane */
+                vector3 grip_dir = vector3_cross(floor_normal, roller_free);
+                float grip_len = vector3_length(grip_dir);
+                if (grip_len > 0.0001f) {
+                    cp->tangent_vector = vector3_scaling(grip_dir, 1.0f / grip_len);
+                    mecanum_tangent_set = true;
+                }
+            }
+        }
+        
+        if (!mecanum_tangent_set && tangent_speed > 0.0001f) {
             cp->tangent_vector = vector3_scaling(rel_vel_tangent, -1.0f / tangent_speed);
             vector3 ra_cross_t = vector3_cross(cp->ra, cp->tangent_vector);
             vector3 rb_cross_t = vector3_cross(cp->rb, cp->tangent_vector);
@@ -904,7 +967,7 @@ void collision_prepare_solver(collision_data *source, collision_data *m) {
             float k_tangent = m->object_a->inverse_mass + m->object_b->inverse_mass +
                               vector3_dot(vector3_addition(ang_a_t, ang_b_t), cp->tangent_vector);
             cp->effective_mass_tangent = (k_tangent > 0.0f) ? (1.0f / k_tangent) : 0.0f;
-        } else {
+        } else if (!mecanum_tangent_set) {
             cp->tangent_vector = vector3_zero();
             cp->effective_mass_tangent = 0.0f;
         }

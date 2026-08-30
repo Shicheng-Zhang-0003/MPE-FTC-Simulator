@@ -14,8 +14,13 @@ void motor_from_spec(motor *m, float stall_torque_nm, float free_speed_rpm, floa
     m->gear_ratio = (gear_ratio > 0.0f) ? gear_ratio : 1.0f;
     m->efficiency = (efficiency > 0.0f && efficiency <= 1.0f) ? efficiency : 0.85f;
 
-    /* Kt = stall_torque / stall_current */
-    m->kt = (stall_current_a > 0.0f) ? (stall_torque_nm / stall_current_a) : 0.0f;
+    /* Kt = motor-shaft stall torque / stall_current.
+     * MFS_MOTOR_FIX: preset stall_torque_nm is the OUTPUT-shaft stall torque (after
+     * the gearbox), so divide by the gear ratio to get the motor-shaft value before
+     * deriving Kt. motor_update then multiplies torque by gear_ratio to produce the
+     * output torque. (Previously the ratio was applied twice -> ~30x too much torque.) */
+    float motor_stall_torque = stall_torque_nm / m->gear_ratio;
+    m->kt = (stall_current_a > 0.0f) ? (motor_stall_torque / stall_current_a) : 0.0f;
 
     /* R = V_nominal / stall_current */
     m->resistance = (stall_current_a > 0.0f) ? (nominal_voltage / stall_current_a) : 1.0f;

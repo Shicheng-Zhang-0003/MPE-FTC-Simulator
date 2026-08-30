@@ -15,7 +15,7 @@ int main(void) {
     constraint_pool_init();
 
     ftc_robot robot;
-    int rc = ftc_robot_create(&world, &robot, 0.0f, 0.5f, 0.0f, MOTOR_GB_5203_30);
+    int rc = ftc_robot_create(&world, &robot, 0.0f, ftc_robot_rest_height(), 0.0f, MOTOR_GB_5203_30);
     if (rc != 0) {
         printf("[FAIL] could not create robot\n");
         return 1;

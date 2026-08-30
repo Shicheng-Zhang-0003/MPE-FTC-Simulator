@@ -27,6 +27,7 @@ KNOWN_TESTS = [
     "cylinder_drop",
     "driven_wheel",
     "math3_inverse",
+    "ftc_integration",
 ]
 
 # Tests that encode desired future behavior but are currently expected
@@ -36,7 +37,7 @@ KNOWN_TESTS = [
 # fake chassis-force patch made this pass but was physically dishonest.
 # It should remain XFAIL until anisotropic mecanum wheel friction exists.
 EXPECTED_FAILURES = {
-    "mecanum_drive": "awaiting real anisotropic/roller friction; do not fake with chassis forces",
+    # mecanum_drive now passes via real anisotropic roller friction (MFS_MECANUM_REAL).
 }
 
 
