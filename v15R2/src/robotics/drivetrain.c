@@ -43,6 +43,10 @@ void drivetrain_mecanum (ftc_robot *robot, float forward, float strafe, float ro
        FR: forward - strafe + rotate
        BL: forward - strafe - rotate
        BR: forward + strafe + rotate */
+    /* MFS_STRAFE_SIGN_FIX: negate strafe so a +strafe input produces
+     * +X world motion (matches the directional mecanum test). */
+    strafe = -strafe;
+
     float wheel_targets [4];
     wheel_targets [0] = forward + strafe - rotate;
     wheel_targets [1] = forward - strafe + rotate;

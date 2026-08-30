@@ -22,12 +22,14 @@ float ftc_robot_rest_height(void) {
     return WHEEL_RADIUS - WHEEL_Y_OFFSET;
 }
 
-int ftc_robot_create(physics_world *world, ftc_robot *robot, float x, float y, float z, motor_preset_id preset) {
+int ftc_robot_create_with_drive(physics_world *world, ftc_robot *robot, float x, float y, float z,
+                                motor_preset_id preset, ftc_drivetrain_type drivetrain_type) {
     if ((!world) || (!robot)) {
         return 1;
     }
     memset(robot, 0, sizeof(ftc_robot));
     robot->motor_preset = preset;
+    robot->drivetrain_type = drivetrain_type;
     robot->mecanum_active = false; /* MPE_FTC_082 */
     robot->axle_axis_x = 1.0f; /* axles point along X (left-right) */
     robot->axle_axis_y = 0.0f;
@@ -82,13 +84,22 @@ int ftc_robot_create(physics_world *world, ftc_robot *robot, float x, float y, f
         if (i == 2) roller_angle = -0.785398f;      /* back-left: -45° */
         if (i == 3) roller_angle = 0.785398f;       /* back-right: +45° */
         
-        rigidbody_set_mecanum(&world->bodies[robot->wheel_bodies[i]], true, roller_angle);
+        if (robot->drivetrain_type == FTC_DRIVETRAIN_MECANUM) {
+                rigidbody_set_mecanum(&world->bodies[robot->wheel_bodies[i]], true, roller_angle);
+            } else {
+                rigidbody_set_mecanum(&world->bodies[robot->wheel_bodies[i]], false, 0.0f);
+            }
 
         /* Set up motor for this wheel */
         motor_preset_apply(&robot->wheel_motors[i], preset);
     }
 
     return 0;
+}
+
+
+int ftc_robot_create(physics_world *world, ftc_robot *robot, float x, float y, float z, motor_preset_id preset) {
+    return ftc_robot_create_with_drive(world, robot, x, y, z, preset, FTC_DRIVETRAIN_MECANUM);
 }
 
 void ftc_robot_update(physics_world *world, ftc_robot *robot, float dt) {

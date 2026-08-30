@@ -59,10 +59,10 @@ int main(void) {
         /* Robot should have moved sideways (x-axis) */
         float lateral_displacement = fabsf(dx);
         if (lateral_displacement < 0.3f) {
-            printf("[FAIL] robot did not strafe enough (dx=%.4f, expected >0.3)\n", dx);
+            printf("[FAIL] robot did not strafe far enough in +X (dx=%.4f, expected >0.3)\n", dx);
             fail = 1;
         } else {
-            printf("[PASS] robot strafed under mecanum drive (dx=%.4f)\n", dx);
+            printf("[PASS] robot strafed in +X under real mecanum roller friction (dx=%.4f)\n", dx);
         }
     }
 
