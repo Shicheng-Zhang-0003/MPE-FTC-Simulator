@@ -1,243 +1,259 @@
-# 🧊 MINIATURE PHYSICS ENGINE (MPE)
+# MPE FTC Simulator — Interim README
 
-<!-- MPE_RELEASE_FREEZE_NOTICE_BEGIN -->
-> **Current development tree:** `v15R2` continues the v15 configuration-system work. It is not a tagged stable release; use the release gates before promotion.
-<!-- MPE_RELEASE_FREEZE_NOTICE_END -->
-<!-- MPE_RELEASE_GATES_NOTICE_BEGIN -->
-> **Release quality:** the current criteria are in [`v15R2/RELEASE_GATES.md`](v15R2/RELEASE_GATES.md). The current candidate notes are in [`v15R2/release_notes_v15R2.md`](v15R2/release_notes_v15R2.md); [`v15R2/release_notes_v15R2.md`](v15R2/release_notes_v15R2.md) documents the prior RC.
-<!-- MPE_RELEASE_GATES_NOTICE_END -->
-
-**License:** GPL-3.0 · **Language:** C · **UI:** GTK3 · **Renderer:** OpenGL 3.3 Core
+> Status: transition build
+> Original project: Miniature Physics Engine v15R2
+> Current direction: FTC robotics simulator with real physics, headless testing, and future FTC-style hardware abstraction.
 
 ---
 
-## 📋 Overview
+## 1. What This Project Is
 
-MPE is a custom-built **3D rigid-body physics engine and real-time rendering pipeline**, written entirely in **C**. It runs on a **zero-dependency core** — the only external requirements are **GTK3** (windowing/UI) and **OpenGL** (render backend).
+This repository is currently transitioning from a general-purpose miniature 3D physics engine into an FTC-oriented robotics simulator.
 
-MPE is built around four priorities:
+The long-term goal is to provide an FTC simulation environment comparable in spirit to what WPILib simulation provides for FRC:
 
-- **Mathematical transparency** — every integrator, solver, and collision test is hand-written and inspectable.
-- **Cache-efficient data layouts** — tightly packed structs and contiguous instance buffers.
-- **Deterministic simulation** — fixed-timestep physics decoupled from render framerate.
-- **Real-time scaling** — GPU instancing and an O(N) spatial-hash broadphase.
+- repeatable autonomous testing
+- realistic drivetrain behavior
+- motors, battery sag, joints, sensors, and mechanisms
+- headless tests suitable for CI
+- eventually, a user-facing robot-programming API
 
----
-
-## ✨ What's New in v15R2
-
-`v15R2` is the active development cycle for the centralised configuration system. Highlights currently present in the tree:
-
-- **Domain-driven architecture** — clean `core`, `physics`, `render`, `scene`, `ui_input` modules.
-- **Warm-starting contact solver** with multi-point Sutherland–Hodgman manifolds for stable stacking.
-- **3D spatial-hash grid broadphase** with adaptive cell sizing.
-- **Interactive spring-joint system** with live magenta rendering.
-- **POSIX-style debug terminal** — drive the whole simulation from a shell.
-- **Built-in validation suite** (F5–F11), including a 60-second long-run stability test and config torture test.
-- **Shader/render failure visibility** — the engine no longer continues silently in a broken render state.
+This is not there yet. The current codebase is an engine in transition.
 
 ---
 
-## 🎨 Rendering System
+## 2. Current Known-Good Baseline
 
-### Hardware-Instanced Rendering
+As of the current interim state:
 
-MPE eliminates per-object draw calls using **GPU instancing**:
+- The engine compiles cleanly.
+- Core physics tests mostly pass.
+- Python tooling has replaced bash/sed as the preferred development infrastructure.
+- Old bash fix scripts remain in the repository for historical context, but should not be used for new mutation/refactor work.
 
-- The CPU packs model matrices + colors into contiguous buffers.
-- The GPU batches all dynamic bodies into **two instanced draws** (spheres, cubes).
-- The grid, selection outline, and spring-joint overlay share a utility shader with cached uniform locations.
+Current test status:
 
-### Shading
+| Test | Status | Notes |
+|---|---:|---|
+| `two_world` | PASS | Confirms separate `physics_world` instances work. |
+| `revolute` | PASS | Constraint/joint baseline. |
+| `teleop_drive` | PASS | Basic FTC-style drivetrain command path. |
+| `driven_wheel` | PASS | Torque-to-wheel-to-ground propulsion path. |
+| `cylinder_drop` | PASS | Cylinder contact/narrowphase baseline. |
+| `math3_inverse` | PASS | Matrix inverse edge-case coverage. |
+| `mecanum_drive` | XFAIL | Expected failure until real anisotropic/roller friction exists. |
 
-- Custom **GLSL Phong** lighting (ambient + diffuse + specular).
-- **Equatorial axis rings** painted on every object (red/green/blue) so rotation is visible at a glance.
-
----
-
-## ⚙️ Physics Engine
-
-### Broadphase — Spatial Hash Grid
-
-Objects are mapped into hashed grid buckets; collision checks are limited to local neighborhoods for **average O(N)** scaling. Cell size adapts to object radii. A sleep system removes inactive bodies from the solver.
-
-### Narrowphase
-
-| Pair | Method |
-|---|---|
-| Sphere–Sphere | Analytical distance test |
-| Sphere–OBB | Closest-point projection |
-| OBB–OBB | Separating Axis Theorem (15 axes) + Sutherland–Hodgman face clipping |
-
-### Solver
-
-- **Impulse-based sequential solver**, 16 iterations, with **warm starting**.
-- Static + kinetic friction, rolling friction, Baumgarte penetration correction.
-- Positional depenetration pass for pile stability.
-
-### Integration
-
-- **Semi-implicit (symplectic) Euler** for linear motion.
-- **Quaternion-based angular integration** (no gimbal lock).
-- **Fixed 60 Hz timestep** with an accumulator and 5-substep cap (spiral-of-death prevention).
+`mecanum_drive` should not be fixed by reintroducing fake chassis forces. It should pass only when the wheel/contact model can produce physically meaningful lateral traction.
 
 ---
 
-## 🧮 Mathematics Core
+## 3. Repository Layout
 
-A fully custom, dependency-free math library: 3D vectors, 4×4 matrices, quaternions, and inertia tensors — designed for tightly packed, cache-friendly structs.
+Important paths:
 
----
+```text
+v15R2/src/
+  core/
+    physics_world.c/.h      Multi-world physics state
+    rigidbody.c/.h          Body data and integration helpers
 
-## 🖥️ Platform & Rendering Stack
+  physics/
+    constraint.c/.h         Constraint/contact solving
+    collision_mechanics.c   Collision/contact mechanics
+    revolute_joint.c/.h     Revolute joint support
+    spring_joint.c/.h       Spring joint support
+    broadphase.c/.h         Broadphase collision support
 
-| Layer | Technology |
-|---|---|
-| Windowing / UI | GTK3 |
-| Graphics API | OpenGL 3.3 Core (via libepoxy) |
-| Lighting | Custom GLSL Phong |
-| Debug visualization | Axis rings, wireframe selection, joint lines, overflow counters |
+  robotics/
+    robot.c/.h              FTC robot aggregate
+    drivetrain.c/.h         Drive command logic
+    motor.c/.h              Motor model
+    motor_presets.c/.h      FTC-ish motor presets
+    battery.c/.h            Battery model
+    wheel_traction.c/.h     Legacy/transition traction code
 
----
+  tests/
+    *_test.c                Headless physics and robotics tests
 
-## 🎮 Controls
+  ui_input/
+    editor/input/terminal/overlay code
 
-### Movement & Camera
+  render/
+    Rendering support
 
-| Action | Input |
-|---|---|
-| Move | `W A S D` |
-| Look around | Mouse (left-click to lock) |
-| Jump / fly up | `Space` |
-| Fly down (Debug) | `Shift` |
-| Steer camera mouse-free (Debug) | `I J K L` |
-| Release mouse | `Escape` |
-| Re-lock mouse (Debug) | `M` |
-| Toggle Game / Debug mode | `0` |
+  scene/
+    Scene save/load support
 
-### Spawning
+  config/
+    Engine tunables
 
-| Action | Input |
-|---|---|
-| Spawn object | Hold `Enter` |
-| Spawner settings | `8` |
+tools/
+  build_check.py            Clean build + compiler diagnostics + struct validation
+  test_runner.py            Headless test runner with XFAIL support
+  refactor.py               Safe Python refactoring helper
+  project_audit.py          Read-only architecture/source audit
 
-### Selection & Editing
-
-| Action | Input |
-|---|---|
-| Select object | Right-click (raycast) **or** `R` (Debug) |
-| Open object menu | `E` |
-| Apply impulse | `F` |
-| Delete object | Middle-click **or** `Delete` (Debug) |
-| World settings | `7` |
-| Save / Load scene | `9` |
-
-### Debug Terminal & Validation
-
-| Action | Input |
-|---|---|
-| Open debug terminal | `T` or `1` (Debug) |
-| Stability stack test | `F5` |
-| Sleep / wake test | `F6` |
-| Editor torture test | `F7` |
-| Spawn stress test (300 objects) | `F8` |
-| Validation report | `F9` |
-| Long-run validation (60 s) | `F10` |
-| **Config torture test** | **F11** |
-
----
-
-## 🐚 Debug Terminal
-
-In Debug Mode, press `T` (or `1`) to open a **POSIX-style shell** over the physics world. The simulation is exposed as a virtual filesystem:
-
-| Path | Contents |
-|---|---|
-| `/obj` | All rigid bodies |
-| `/joint` | All spring joints |
-| `/world` | World variables (gravity, drag, friction) |
-| `/camera` | Camera state |
-| `/spawner` | Spawner settings |
-
-A few examples:
-
-```
-touch new.sph            # spawn a sphere
-ln 1 2                   # spring-join objects 1 and 2
-mv 3 /pos/0/10/0         # teleport object 3
-chown 5.0 3              # set object 3's mass to 5 kg
-chmod static 3           # make it immovable
-kill -STOP 3             # put it to sleep
-ps aux                   # list every body with state
-export GRAVITY=-2.0      # change world gravity
+fixes/
+  Historical bash fix scripts. Do not use for new refactors.
 ```
 
-Type `help` for the full command list, `man <command>` for usage. `Ctrl+L` clears, `Esc` closes. Mutating commands require Debug Mode; in Game Mode the terminal is read-only.
-
 ---
 
-## 🧪 Validation Tests
+## 4. Build
 
-MPE ships with built-in stability tests:
-
-| Key | Test |
-|---|---|
-| `F5` | 10-cube stability stack |
-| `F6` | Sleeping cube + moving projectile (sleep/wake) |
-| `F7` | Editor torture: select, joint, delete, reset |
-| `F8` | Spawn stress: up to 300 mixed objects |
-| `F9` | Print validation report |
-| `F10` | Long-run validation: 3600 ticks (60 s) of idle stability |
-
-`F10` monitors for NaN values, fallen objects, and residual motion, printing `PASS`/`FAIL` at the end.
-
----
-
-## 🛠️ Build Instructions
-
-### Dependencies (Ubuntu / Debian)
+From the source directory:
 
 ```bash
-sudo apt update
-sudo apt install build-essential pkg-config libgtk-3-dev libepoxy-dev
+cd v15R2/src
+make clean && make
 ```
 
-For other distributions (Fedora, Arch, SUSE, Alpine, Gentoo, Nix), see [install/linux/linux_install_instructions.md](install/linux/linux_install_instructions.md).
-
-### Build and run
+Preferred project-level build check:
 
 ```bash
-cd src
-make clean
-make
-./engine
+python3 tools/build_check.py
 ```
 
 ---
 
-## ⚠️ Known Limitations
+## 5. Test
 
-- **Wayland:** Mouse locking does not work under native Wayland. Run under X11, or try `GDK_BACKEND=x11 ./engine`.
-- **Scene format:** Save/load preserves bodies but **not** spring joints, object IDs, or sleep state. Scene format v2 is planned post-v15R2.
-- **Object count:** Performance degrades gradually above ~1136 objects; rendering is the primary bottleneck at high counts.
-- **Global state:** The engine still uses file-scope globals; full encapsulation is deferred to v15.
+Preferred test command:
+
+```bash
+python3 tools/test_runner.py
+```
+
+List known tests:
+
+```bash
+python3 tools/test_runner.py --list
+```
+
+Run a filtered test:
+
+```bash
+python3 tools/test_runner.py driven_wheel
+```
+
+Current expectation:
+
+- all non-mecanum tests should pass
+- `mecanum_drive` is expected to fail until anisotropic friction is implemented
 
 ---
 
-## 📜 Version History
+## 6. Development Rules Going Forward
 
-- **v15R2 (development)** — ongoing v15 configuration-system work. *(current tree)*
-- **v1.4 Alpha RC3** — domain-driven restructure, spatial-hash broadphase, physics-world encapsulation.
-- **v1.4 Alpha 2** — warm-starting solver, multi-point contact manifolds.
-- **v1.4 Alpha RC1** — spring joints, joint renderer, color painting, OBB raycast selection.
-- **v1.3** — established instanced rendering and spatial-hash direction.
+### Use Python tools, not bash mutation scripts
 
-See `evolution.txt` for the full lineage back to stage 0.
+The project previously used many numbered shell scripts in `fixes/` to mutate C source files using `sed`, `awk`, and inline text insertion. That approach caused structural C corruption and is now considered unsafe for continued development.
+
+Going forward:
+
+- use `tools/refactor.py` for scripted source edits
+- use direct C edits for normal feature work
+- use `tools/build_check.py` after every structural change
+- use `tools/test_runner.py` after every physics/robotics change
+- do not run old fix scripts as part of active development
+
+### Do not fake physics to make tests pass
+
+The purpose of the simulator is FTC usefulness, especially for autonomous and drivetrain tuning. A passing test is only valuable if the underlying model is physically meaningful.
+
+Specifically:
+
+- do not reintroduce fake mecanum chassis forces as a permanent solution
+- do not lower test thresholds to hide missing physics
+- mark future-physics tests as XFAIL until the real model exists
 
 ---
 
-### Screenshots
+## 7. Current Architectural Risks
 
-<img width="4424" height="1824" alt="Screenshot from 2026-07-18 17-18-52" src="https://github.com/user-attachments/assets/5d1d044d-3926-469e-ab27-9f3719452324" />
-<img width="4558" height="1908" alt="Screenshot from 2026-07-18 17-20-09" src="https://github.com/user-attachments/assets/acebe348-707e-485e-835c-08cd1b1dc0fa" />
+The main architectural risks are:
+
+### 7.1 `simulation.c` god file
+
+`simulation.c` still contains too many responsibilities:
+
+- physics stepping
+- editor behavior
+- input/menu dispatch
+- validation helpers
+- GUI/runtime coupling
+
+This must be split before a clean FTC simulator API can exist.
+
+### 7.2 Global state
+
+The codebase still contains legacy global state such as scene object arrays and selected object/editor state. The newer `physics_world` path is the correct direction, but the GUI/editor path has not fully migrated.
+
+### 7.3 Scene persistence
+
+The scene format needs to reliably preserve robot-relevant state:
+
+- stable body IDs
+- joints/constraints
+- robot assemblies
+- mechanism configuration
+- possibly sleep state and material data
+
+### 7.4 Mecanum physics
+
+Mecanum currently lacks real anisotropic/roller contact behavior. The failing mecanum test is intentional and should remain a roadmap gate.
+
+---
+
+## 8. Immediate Roadmap
+
+### Phase A — Stabilize Infrastructure
+
+- Keep Python tooling green.
+- Retire old bash fix scripts from active workflows.
+- Maintain clear test status with XFAIL for known future physics.
+
+### Phase B — Split `simulation.c`
+
+Recommended extraction order:
+
+1. validation/reporting helpers
+2. GUI/editor input dispatch
+3. physics tick wrapper
+4. render/world synchronization
+
+The goal is to make the physics core usable headlessly without dragging the GTK/editor stack along with it.
+
+### Phase C — Complete Real Drivetrain Physics
+
+- Implement anisotropic friction / mecanum roller behavior.
+- Remove or quarantine legacy fake traction paths.
+- Turn `mecanum_drive` from XFAIL to PASS only when the physical model is real.
+
+### Phase D — FTC HAL
+
+Only after the world/physics/runtime architecture is clean:
+
+- simulated motors
+- simulated servos
+- simulated IMU
+- simulated encoders
+- hardware map
+- OpMode-style lifecycle
+- robot configuration files
+
+---
+
+## 9. Project Philosophy
+
+This simulator should prioritize truthful physics over convenient demos.
+
+A robot that drives correctly in the simulator should be useful for real FTC reasoning. That means:
+
+- motor commands should become torque
+- torque should move wheels/joints
+- wheels should interact with the floor through contact/friction
+- sensors should read from simulated physical state
+- user robot code should not know whether it is running against real or simulated hardware
+
+The current project is not finished, but the foundation is now moving in that direction.
