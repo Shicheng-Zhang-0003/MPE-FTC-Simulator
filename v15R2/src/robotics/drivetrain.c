@@ -1,5 +1,5 @@
 /* MPE_FTC_074: Drivetrain implementation */
-/* MPE_FTC_082: Fixed syntax error (stray '}') + real mecanum chassis forces */
+/* MPE_FTC_082 TEMPORARY — replace with anisotropic friction (MPE_FTC_095): Fixed syntax error (stray '}') + real mecanum chassis forces */
 #include "drivetrain.h"
 #include "../core/math3D.h"
 
@@ -16,7 +16,7 @@ void drivetrain_tank (ftc_robot *robot, float left_power, float right_power) {
         commands [i] = is_left ? left_power : right_power;
     }
     ftc_robot_set_wheel_commands (robot, commands, robot->wheel_count);
-    robot->mecanum_active = false; /* MPE_FTC_082 */
+    robot->mecanum_active = false; /* MPE_FTC_082 TEMPORARY — replace with anisotropic friction (MPE_FTC_095) */
 }
 
 /* MPE_FTC_075 + MPE_FTC_082: Mecanum drive with inverse kinematics
@@ -62,7 +62,7 @@ void drivetrain_mecanum (ftc_robot *robot, float forward, float strafe, float ro
     /* Set motor commands (forward component uses wheel traction) */
     ftc_robot_set_wheel_commands (robot, wheel_targets, 4);
 
-    /* MPE_FTC_082: Compute direct chassis force for strafe + rotate.
+    /* MPE_FTC_082 TEMPORARY — replace with anisotropic friction (MPE_FTC_095): Compute direct chassis force for strafe + rotate.
      * Local space: X = lateral (strafe), Y = up, Z = forward.
      * Force scale: tuned so full input ≈ 80 N, enough to move an 8 kg
      * chassis at ~0.5 m/s² against friction. */
@@ -81,7 +81,7 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
     if ((!world) || (!robot) || (dt <= 0.0f)) {return;}
     ftc_robot_update (world, robot, dt);
 
-    /* MPE_FTC_082: Apply mecanum chassis forces after motor update */
+    /* MPE_FTC_082 TEMPORARY — replace with anisotropic friction (MPE_FTC_095): Apply mecanum chassis forces after motor update */
     if (robot->mecanum_active) {
         int idx = robot->chassis_body;
         if ((idx >= 0) && (idx < world->body_count)) {

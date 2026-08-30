@@ -21,7 +21,7 @@ typedef struct {
     vector3 force_accumulator, torque_accumulator;
     //Dimensions
     float radius;
-    float cylinder_half_length; /* MPE_FTC_090: half-length along axle (X) *//
+    float cylinder_half_length; /* MPE_FTC_090: half-length along axle (X) */
     bool static_state;
     float friction_static, friction_kinetic;
     vector3 colour;
@@ -46,7 +46,7 @@ void rigidbody_initialisation_sphere(rigidbody *rigid_body, float radius, float 
 void rigidbody_update_inertia_sphere(rigidbody *rigid_body);
 void rigidbody_update_inertia_cube(rigidbody *rigid_body);
 void rigidbody_initialisation_cylinder(rigidbody *rigid_body, float radius, float half_length, float mass, vector3 position_input); /* MPE_FTC_090 */
-void rigidbody_update_inertia_cylinder(rigidbody *rigid_body); /* MPE_FTC_090 *//
+void rigidbody_update_inertia_cylinder(rigidbody *rigid_body); /* MPE_FTC_090 */
 void rb_apply_forces_perfect(rigidbody *rigid_body, vector3 force_applied);
 void rb_apply_forces_localised(rigidbody *rigid_body, vector3 force_applied, vector3 locale_impact);
 float rb_get_kinetic_energy(rigidbody *rigid_body);

@@ -680,7 +680,10 @@ bool collision_static_plane_cube(rigidbody *cube, float plane_y, collision_data 
     return true;
 }
 
+/* MPE_FTC_093: cylinder floor contact */
+bool collision_static_plane_cylinder(rigidbody *cyl, float plane_y, collision_data *collision_output_data);
 bool collision_static_plane_body(rigidbody *body, float plane_y, collision_data *collision_output_data) {
+    if (body->type == object_cylinder) {return collision_static_plane_cylinder(body, plane_y, collision_output_data);}
     if (body->type == object_sphere) {
         return collision_static_plane_sphere(body, plane_y, collision_output_data);
     }
@@ -1047,4 +1050,39 @@ void contact_cache_save(collision_data *manifolds, int count) {
 
 void contact_cache_clear(void) {
     contact_impulse_cache_count = 0;
+}
+
+/* MPE_FTC_093: Cylinder vs static floor plane.
+ * Models the cylinder as axle segment + radius. Each axle endpoint acts
+ * like a sphere of radius r; an endpoint below the plane yields a contact.
+ * Two contacts (one per axle end) give a stable resting wheel.
+ * Normal matches the sphere-floor convention: (0,-1,0). */
+bool collision_static_plane_cylinder(rigidbody *cyl, float plane_y, collision_data *collision_output_data) {
+    if (cyl->type != object_cylinder) {return false;}
+    vector3 axis = cyl->cached_axes[0]; /* axle = local X in world space */
+    float r = cyl->radius;
+    float h = cyl->cylinder_half_length;
+    vector3 axle_offset = vector3_scaling(axis, h);
+    vector3 e1 = vector3_subtraction(cyl->position, axle_offset);
+    vector3 e2 = vector3_addition(cyl->position, axle_offset);
+    rigidbody *plane_body = collision_static_plane_body_proxy(plane_y);
+    collision_output_data->object_a = cyl;
+    collision_output_data->object_b = plane_body;
+    collision_output_data->normal_vector = (vector3){0.0f, -1.0f, 0.0f};
+    collision_output_data->contact_count = 0;
+    float pen1 = plane_y - (e1.y - r);
+    if ((pen1 > 0.0f) && (collision_output_data->contact_count < 2)) {
+        contact_point_data *cp = &collision_output_data->contacts[collision_output_data->contact_count];
+        cp->position = (vector3){e1.x, e1.y - r, e1.z};
+        cp->penetration = pen1;
+        collision_output_data->contact_count++;
+    }
+    float pen2 = plane_y - (e2.y - r);
+    if ((pen2 > 0.0f) && (collision_output_data->contact_count < 2)) {
+        contact_point_data *cp = &collision_output_data->contacts[collision_output_data->contact_count];
+        cp->position = (vector3){e2.x, e2.y - r, e2.z};
+        cp->penetration = pen2;
+        collision_output_data->contact_count++;
+    }
+    return collision_output_data->contact_count > 0;
 }

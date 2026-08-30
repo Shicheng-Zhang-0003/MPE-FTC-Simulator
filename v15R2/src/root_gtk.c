@@ -17,7 +17,6 @@ static void on_main_window_destroy(GtkWidget *widget, gpointer user_data) {
 }
 //On Call
 static void when_realised(GtkGLArea *gl_area_widget) {
-    render_init (); /* FIX_038b: ensure renderer is initialized */
     if (gtk_gl_area_get_error(gl_area_widget) != NULL) {
         return;
     }

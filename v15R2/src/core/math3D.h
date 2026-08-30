@@ -166,7 +166,7 @@ static inline math3 math3_inverse(math3 matrix) {
         (matrix.matrix[0][1] *
          (matrix.matrix[1][0] * matrix.matrix[2][2] - matrix.matrix[1][2] * matrix.matrix[2][0])) +
         (matrix.matrix[0][2] * (matrix.matrix[1][0] * matrix.matrix[2][1] - matrix.matrix[1][1] * matrix.matrix[2][0]));
-    if ((!isfinite(determinant)) || (fabsf(determinant) < math_epsilon)) {
+    if ((!isfinite(determinant)) || (fabsf(determinant) < 1e-12f) /* MPE_FTC_093g: smaller epsilon for small inertia tensors */) {
         math3 singular_matrix = {{{0.0f}}};
         return singular_matrix;
     }

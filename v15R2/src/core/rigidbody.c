@@ -135,6 +135,8 @@ void rigidbody_sanitize(rigidbody *rigid_body) {
             (a3_math3_is_zero(rigid_body->inverse_inertia_system))) {
             if (rigid_body->type == object_sphere) {
                 rigidbody_update_inertia_sphere(rigid_body);
+            } else if (rigid_body->type == object_cylinder) { /* MPE_FTC_093d */
+                rigidbody_update_inertia_cylinder(rigid_body);
             } else {
                 rigidbody_update_inertia_cube(rigid_body);
             }
@@ -465,6 +467,8 @@ void rigidbody_set_static(rigidbody *rigid_body, bool make_static) {
             rigidbody_update_inertia_sphere(rigid_body);
     } else if (rigid_body->type == object_cylinder) { /* MPE_FTC_091 */
         rigidbody_update_inertia_cylinder(rigid_body);
+    } else if (rigid_body->type == object_cylinder) { /* MPE_FTC_093d */
+        rigidbody_update_inertia_cylinder(rigid_body);
     } else {
             rigidbody_update_inertia_cube(rigid_body);
         }
@@ -473,4 +477,59 @@ void rigidbody_set_static(rigidbody *rigid_body, bool make_static) {
     }
 
     rigidbody_update_axes(rigid_body);
+}
+
+/* MPE_FTC_090: Cylinder inertia and initialization */
+void rigidbody_update_inertia_cylinder(rigidbody *rigid_body) {
+    float r = rigid_body->radius;
+    float h = rigid_body->cylinder_half_length;
+    float mass = rigid_body->mass;
+    float L = 2.0f * h;
+    
+    rigid_body->inertia_tensor_local = (math3){{{0}}};
+    /* Axle is along X axis */
+    rigid_body->inertia_tensor_local.matrix[0][0] = 0.5f * mass * r * r;
+    rigid_body->inertia_tensor_local.matrix[1][1] = (mass / 12.0f) * (3.0f * r * r + L * L);
+    rigid_body->inertia_tensor_local.matrix[2][2] = (mass / 12.0f) * (3.0f * r * r + L * L);
+    
+    if (mass > 0) {
+        rigid_body->inverse_inertia_tensor_local = math3_inverse(rigid_body->inertia_tensor_local);
+        rigid_body->inverse_inertia_system = rigid_body->inverse_inertia_tensor_local;
+    } else {
+        rigid_body->inverse_inertia_tensor_local = (math3){{{0}}};
+        rigid_body->inverse_inertia_system = (math3){{{0}}};
+    }
+}
+
+void rigidbody_initialisation_cylinder(rigidbody *rigid_body, float radius, float half_length, float mass, vector3 position_input) {
+    rigid_body->position = position_input;
+    rigid_body->velocity = vector3_zero();
+    rigid_body->acceleration = vector3_zero();
+    rigid_body->orientation = vector4_identity();
+    rigid_body->angular_velocity = vector3_zero();
+    rigid_body->angular_acceleration = vector3_zero();
+    rigid_body->colour = (vector3){0.6f, 0.6f, 0.6f}; /* Grey for cylinders */
+    rigid_body->type = object_cylinder;
+    rigidbody_update_axes(rigid_body);
+    
+    rigid_body->mass = mass;
+    if (mass > 0) {
+        rigid_body->inverse_mass = 1.0f / mass;
+    } else {
+        rigid_body->inverse_mass = 0.0f;
+    }
+    rigid_body->radius = radius;
+    rigid_body->cylinder_half_length = half_length;
+    rigid_body->restitution = g_cfg.body_defaults.sphere_restitution;
+    rigid_body->static_state = (mass == 0);
+    rigid_body->is_sleeping = false;
+    rigid_body->sleep_timer = 0.0f;
+    rigid_body->nice_value = 0;
+    rigid_body->friction_static = 0.4f;
+    rigid_body->friction_kinetic = 0.3f;
+    
+    rigidbody_update_inertia_cylinder(rigid_body);
+    
+    rigid_body->force_accumulator = vector3_zero();
+    rigid_body->torque_accumulator = vector3_zero();
 }

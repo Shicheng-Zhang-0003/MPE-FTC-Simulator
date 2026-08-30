@@ -61,7 +61,28 @@ test_teleop_drive_asan:
 MECANUM_TEST_SOURCES := tests/mecanum_drive_test.c core/physics_world.c core/rigidbody.c \
 	physics/collision_mechanics.c physics/broadphase.c physics/constraint.c physics/revolute_joint.c \
 	robotics/motor.c robotics/motor_presets.c robotics/battery.c robotics/robot.c robotics/drivetrain.c \
-	robotics/wheel_traction.c config/mpe_config.c config/mpe_config_schema.c
+	config/mpe_config.c config/mpe_config_schema.c
 test_mecanum_drive:
 	$(CC) $(CFLAGS) -DMPE_MECANUM_DRIVE_TEST $(MECANUM_TEST_SOURCES) -lm -o test_mecanum_drive
 	./test_mecanum_drive
+
+# MPE_FTC_092: cylinder drop test
+CYLINDER_DROP_TEST_SOURCES = tests/cylinder_drop_test.c core/physics_world.c core/rigidbody.c physics/collision_mechanics.c physics/broadphase.c physics/constraint.c physics/revolute_joint.c config/mpe_config.c config/mpe_config_schema.c
+
+test_cylinder_drop: $(CYLINDER_DROP_TEST_SOURCES)
+	$(CC) $(CFLAGS) -DMPE_CYLINDER_DROP_TEST $(CYLINDER_DROP_TEST_SOURCES) -lm -o test_cylinder_drop
+	./test_cylinder_drop
+
+# MPE_FTC_093a: driven-wheel propulsion proof
+DRIVEN_WHEEL_TEST_SOURCES = tests/driven_wheel_test.c core/physics_world.c core/rigidbody.c physics/collision_mechanics.c physics/broadphase.c physics/constraint.c physics/revolute_joint.c config/mpe_config.c config/mpe_config_schema.c
+
+test_driven_wheel: $(DRIVEN_WHEEL_TEST_SOURCES)
+	$(CC) $(CFLAGS) -DMPE_DRIVEN_WHEEL_TEST $(DRIVEN_WHEEL_TEST_SOURCES) -lm -o test_driven_wheel
+	./test_driven_wheel
+
+# MPE_FTC_093e: math3_inverse diagnostic
+MATH3_INV_TEST_SOURCES = tests/math3_inverse_test.c core/physics_world.c core/rigidbody.c physics/collision_mechanics.c physics/broadphase.c physics/constraint.c physics/revolute_joint.c config/mpe_config.c config/mpe_config_schema.c
+
+test_math3_inverse: $(MATH3_INV_TEST_SOURCES)
+	$(CC) $(CFLAGS) -DMPE_MATH3_INVERSE_TEST $(MATH3_INV_TEST_SOURCES) -lm -o test_math3_inverse
+	./test_math3_inverse

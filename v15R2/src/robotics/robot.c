@@ -1,6 +1,6 @@
 /* MPE_FTC_073: FTC robot object implementation */
+/* MPE_FTC_094_CLEANUP: wheel_traction removed — real cylinder friction */
 #include "robot.h"
-#include "wheel_traction.h" /* MPE_FTC_076 */
 #include "../physics/constraint.h"
 #include <math.h>
 #include <string.h>
@@ -110,19 +110,7 @@ void ftc_robot_update(physics_world *world, ftc_robot *robot, float dt) {
         wheel->torque_accumulator.y += axle.y * torque;
         wheel->torque_accumulator.z += axle.z * torque;
         /* MPE_FTC_076: raycast traction augments contact friction */
-        int ground_idx = -1;
-        for (int g = 0; g < world->body_count; g++) {
-            if (world->bodies[g].static_state) {
-                ground_idx = g;
-                break;
-            }
-        }
-        if (ground_idx >= 0) {
-            vector3 forward_world =
-                vector4_rotate_to_vector3(world->bodies[robot->chassis_body].orientation, (vector3){0.0f, 0.0f, 1.0f});
-            float traction_force = torque / WHEEL_RADIUS;
-            wheel_traction_apply(world, wheel_idx, ground_idx, forward_world, traction_force);
-        }
+        //Retired 076
         rigidbody_wake(wheel); /* MPE_FTC_078: keep driven wheels awake so motor torque is applied */
     }
 }
