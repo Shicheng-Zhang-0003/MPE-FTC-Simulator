@@ -108,6 +108,7 @@ extern int debug_last_manifold_overflow_count;
 void physics_halt_set(bool halted);
 void physics_halt_for_ticks(int ticks);
 bool physics_is_halted(void);
+bool physics_halt_tick_update(void); /* MFS_PHASE_A */
 /* MPE_TASK_V15R2_PHYSICS_HALT_EXTERN_END */
 
 #define a3_version_string "v15R2" /* v15R2 release candidate */

@@ -13,29 +13,6 @@ int object_count = 0;
 int object_capacity = 0;
 //World Physics Globals
 static bool editor_dialog_active = false;
-/* MPE_TASK_V15R2_PHYSICS_HALT_BEGIN */
-static int physics_halt_ticks_remaining = 0;
-static bool physics_halted = false;
-
-void physics_halt_set(bool halted) {
-    physics_halted = halted;
-    if (!halted) {
-        physics_halt_ticks_remaining = 0;
-    }
-}
-
-void physics_halt_for_ticks(int ticks) {
-    if (ticks <= 0) {
-        ticks = 1;
-    }
-    physics_halt_ticks_remaining = ticks;
-    physics_halted = true;
-}
-
-bool physics_is_halted(void) {
-    return physics_halted;
-}
-/* MPE_TASK_V15R2_PHYSICS_HALT_END */
 
 int debug_last_object_count = 0;
 int debug_last_broadphase_pair_count = 0;
@@ -185,16 +162,7 @@ gboolean physics_step_increment(gpointer user_data_pointer) {
         return TRUE;
     }
     /* MPE_TASK_V15R2_PHYSICS_HALT_CHECK_BEGIN */
-    if (physics_halt_ticks_remaining > 0) {
-        physics_halt_ticks_remaining--;
-        if (physics_halt_ticks_remaining == 0) {
-            physics_halted = false;
-        }
-        gtk_widget_queue_draw(GTK_WIDGET(user_data_pointer));
-        overlay_update();
-        return TRUE;
-    }
-    if (physics_halted) {
+    if (physics_halt_tick_update()) {
         gtk_widget_queue_draw(GTK_WIDGET(user_data_pointer));
         overlay_update();
         return TRUE;
