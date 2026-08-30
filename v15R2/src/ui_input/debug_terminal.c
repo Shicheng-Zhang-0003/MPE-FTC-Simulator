@@ -1,4 +1,5 @@
 #include "../mpe_engine.h"
+#include "../robotics/gui_robot_registry.h" /* MFS_GUI_BRIDGE */
 #include "debug_terminal.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -887,6 +888,20 @@ static void cmd_cat(int argc, char **argv) {
         }
     }
 }
+/* MFS_GUI_BRIDGE_TERMINAL: spawn FTC robot via terminal */
+static void cmd_touch_robot(int argc, char **argv) {
+    (void) argc; (void) argv;
+    int idx = gui_robot_spawn(5.0f, ftc_robot_rest_height(), 5.0f, MOTOR_GB_5203_30);
+    if (idx < 0) {
+        term_err("mpe: touch robot: spawn failed (max robots or no world)\n");
+        return;
+    }
+    term_printf("term_ok", "/robot/%d created at (5.0, %.2f, 5.0) motor=GB5203-30:1\n",
+                idx, ftc_robot_rest_height());
+    term_dim("Drive with WASD (forward/strafe) + Q/E (rotate).\n");
+}
+
+
 static void cmd_touch(int argc, char **argv) {
     if (argc < 2) {
         int created_index = term_create_object(object_sphere);
@@ -899,6 +914,12 @@ static void cmd_touch(int argc, char **argv) {
         if (argv[argument_index][0] == '-') {
             continue;
         }
+    /* MFS_GUI_BRIDGE_TERMINAL: intercept "touch robot" */
+    if ((argc > 1) && (strstr(argv[1], "robot"))) {
+        cmd_touch_robot(argc, argv);
+        return;
+    }
+
         object_type spawn_type = object_sphere;
         if (strstr(argv[argument_index], "cube")) {
             spawn_type = object_cube;

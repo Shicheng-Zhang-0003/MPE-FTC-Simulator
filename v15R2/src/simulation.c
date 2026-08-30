@@ -1,9 +1,12 @@
 #include "mpe_engine.h"
+#include "robotics/gui_robot_registry.h" /* MFS_GUI_BRIDGE */
 #include "core/validation_report.h"
 #include "physics/depenetration.h"
 #include "core/simulation_camera.h"
 #include "core/simulation_physics_loop.h"
 #include "core/long_run_validation.h"
+
+#include "ui_input/simulation_dispatch.h"
 #include <gtk/gtk.h>
 #include <stdbool.h>
 #include <stdlib.h>
@@ -87,6 +90,22 @@ gboolean physics_step_increment(gpointer user_data_pointer) {
 
     /* THE PHYSICS LOOP */
     simulation_physics_tick(frame_delta_time);
+
+    /* MFS_GUI_BRIDGE_TICK: Robot drive + physics */
+    if (gui_robot_get_count() > 0) {
+        float kb_forward = 0.0f, kb_strafe = 0.0f, kb_rotate = 0.0f;
+        if (main_inputs.w_key_pressed) { kb_forward += 1.0f; }
+        if (main_inputs.s_key_pressed) { kb_forward -= 1.0f; }
+        if (main_inputs.a_key_pressed) { kb_strafe -= 1.0f; }
+        if (main_inputs.d_key_pressed) { kb_strafe += 1.0f; }
+        if (main_inputs.e_key_pressed) { kb_rotate += 1.0f; }
+        if (main_inputs.q_key_pressed) { kb_rotate -= 1.0f; }
+        if ((kb_forward != 0.0f) || (kb_strafe != 0.0f) || (kb_rotate != 0.0f)) {
+            gui_robot_apply_drive(kb_forward, kb_strafe, kb_rotate);
+        }
+        gui_robot_tick(frame_delta_time);
+    }
+    /* MFS_GUI_BRIDGE_TICK_END */
 
     /* Post-physics bookkeeping */
     gtk_widget_queue_draw(GTK_WIDGET(user_data_pointer));
