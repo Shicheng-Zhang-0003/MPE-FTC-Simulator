@@ -110,8 +110,8 @@ void simulation_input_dispatch(GtkWidget *parent_window) {
         if (main_inputs.b_key_pressed) { kb_forward -= 1.0f; }
         if (main_inputs.v_key_pressed) { kb_strafe  += 1.0f; }
         if (main_inputs.n_key_pressed) { kb_strafe  -= 1.0f; }
-        if (main_inputs.c_key_pressed) { kb_rotate  += 1.0f; } /* FIX 113: C=rotate left */
-        if (main_inputs.h_key_pressed) { kb_rotate  -= 1.0f; } /* FIX 113: H=rotate right */
+        if (main_inputs.c_key_pressed) { kb_rotate  -= 1.0f; } /* MFS_125: C=rotate left (CCW) */ /* FIX 113: C=rotate left */
+        if (main_inputs.h_key_pressed) { kb_rotate  += 1.0f; } /* MFS_125: H=rotate right (CW) */ /* FIX 113: H=rotate right */
         /* ALWAYS apply drive — zeros motors when no keys pressed */
         gui_robot_apply_drive(kb_forward, kb_strafe, kb_rotate);
                             }

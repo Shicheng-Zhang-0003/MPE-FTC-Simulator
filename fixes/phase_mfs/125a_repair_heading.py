@@ -1,3 +1,68 @@
+#!/usr/bin/env python3
+"""
+MFS 125a — Repair: rewrite gui_robot_registry.c with proper nose indicator
+===========================================================================
+The 125 fallback insertion corrupted the file structure. This script
+rewrites gui_robot_registry.c cleanly with the nose indicator integrated
+correctly into both spawn and tick.
+
+Usage:
+  cd <project_root>
+  python3 fixes/phase_mfs/125a_repair_heading.py [--dry-run]
+"""
+
+import sys
+import subprocess
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+ROOT = SCRIPT_DIR.parent.parent
+SRC = ROOT / "v15R2" / "src"
+TOOLS = ROOT / "tools"
+
+sys.path.insert(0, str(TOOLS))
+
+DRY_RUN = "--dry-run" in sys.argv
+
+
+def log(msg):
+    print(f"  [125a] {msg}")
+
+
+def run_build():
+    result = subprocess.run(
+        [sys.executable, str(TOOLS / "build_check.py"), "--quick"],
+        cwd=str(ROOT), capture_output=True, text=True, timeout=120
+    )
+    if result.returncode != 0:
+        print(result.stdout[-3000:] if result.stdout else "")
+        print(result.stderr[-2000:] if result.stderr else "")
+        return False
+    return True
+
+
+def run_tests():
+    result = subprocess.run(
+        [sys.executable, str(TOOLS / "test_runner.py")],
+        cwd=str(ROOT), capture_output=True, text=True, timeout=300
+    )
+    print(result.stdout[-3000:] if result.stdout else "")
+    return result.returncode == 0
+
+
+def main():
+    print("=" * 60)
+    print("MFS 125a: Repair heading indicator")
+    print("=" * 60)
+
+    if DRY_RUN:
+        print("  ** DRY RUN **")
+        print()
+
+    path = SRC / "robotics" / "gui_robot_registry.c"
+
+    # The clean rewrite — nose indicator properly integrated
+    clean_content = """\
 /* MFS_GUI_ROBOT_REGISTRY: GUI robot management with visual proxies.
 * FIX 105: Initialize physics_world before creating bodies.
 * FIX 125: Orange nose sphere at front of chassis for heading indication. */
@@ -171,3 +236,49 @@ return NULL;
 }
 return &mfs_gui_robots[index];
 }
+"""
+
+    if not DRY_RUN:
+        path.write_text(clean_content)
+    log(f"[OK] gui_robot_registry.c rewritten cleanly ({len(clean_content)} bytes)")
+
+    # Also verify the header has nose_proxy
+    h_path = SRC / "robotics" / "gui_robot_registry.h"
+    h_content = h_path.read_text()
+    if "nose_proxy" not in h_content:
+        # Add nose_proxy to the struct
+        h_content = h_content.replace(
+            "int wheel_proxies[FTC_MAX_WHEELS];",
+            "int wheel_proxies[FTC_MAX_WHEELS];\nint nose_proxy;             /* MFS_125 */"
+        )
+        if not DRY_RUN:
+            h_path.write_text(h_content)
+        log("[OK] Added nose_proxy to gui_robot_registry.h")
+    else:
+        log("[SKIP] nose_proxy already in header")
+
+    # Build verification
+    if not DRY_RUN:
+        log("Running build verification...")
+        if not run_build():
+            log("[FAIL] Build failed")
+            return 1
+        log("[PASS] Build successful!")
+
+        log("Running headless tests...")
+        if not run_tests():
+            log("[WARN] Some tests failed")
+        else:
+            log("[PASS] All tests passed!")
+
+    print()
+    print("=" * 60)
+    print("  125a repair complete.")
+    print("  Orange nose sphere at front of chassis (+Z local).")
+    print("  C = rotate left (CCW), H = rotate right (CW).")
+    print("=" * 60)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

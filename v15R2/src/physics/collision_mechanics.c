@@ -948,12 +948,28 @@ void collision_prepare_solver(collision_data *source, collision_data *m) {
                 
                 /* Grip direction is perpendicular to roller_free, still in the floor plane */
                 vector3 grip_dir = vector3_cross(floor_normal, roller_free);
+
+/* MFS_DEBUG_STRAFE: diagnostic for mecanum strafe debugging */
+#ifdef MFS_DEBUG_STRAFE
+{
+    static int strafe_diag_counter = 0;
+    if ((strafe_diag_counter++ % 60) == 0) {
+        float grip_len = vector3_length(grip_dir);
+        printf("[STRAFE_DIAG] roller_angle=%.2f rad grip_len=%.4f mecanum=%d\n",
+               mecanum_wheel->roller_angle_rad, grip_len, mecanum_wheel->is_mecanum ? 1 : 0);
+    }
+}
+#endif
                 float grip_len = vector3_length(grip_dir);
                 if (grip_len > 0.0001f) {
                     cp->tangent_vector = vector3_scaling(grip_dir, 1.0f / grip_len);
                     mecanum_tangent_set = true;
                 }
             }
+/* MFS_127_STRAFE_DIAG: Conditional diagnostics for mecanum strafe debugging.
+ * Compile with -DMFS_DEBUG_STRAFE to enable. */
+
+
         }
         
         if (!mecanum_tangent_set && tangent_speed > 0.0001f) {

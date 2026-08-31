@@ -15,6 +15,7 @@
 typedef struct {
     int chassis_proxy;          /* index in obj_per_scene, -1 if none */
     int wheel_proxies[FTC_MAX_WHEELS];
+int nose_proxy;             /* MFS_125: heading indicator */
 } gui_robot_proxy;
 
 /* Registry state */

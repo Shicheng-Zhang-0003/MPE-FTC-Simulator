@@ -134,7 +134,7 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
                     chassis->force_accumulator,
                     vector3_scaling(lat, m * 2.0f) /* MFS_124: balanced damping */ /* MFS_122: reduced from 3.0 */);
                 float yaw_vel = chassis->angular_velocity.y;
-                chassis->torque_accumulator.y -= yaw_vel * m * 1.0f * 0.02f /* MFS_124: balanced yaw damping */;
+                chassis->torque_accumulator.y -= yaw_vel * m * 1.5f * 0.02f /* MFS_127: increased from 1.0 to stop residual rotation */ /* MFS_124: balanced yaw damping */;
 
 /* MFS_124_VELOCITY_CAP: prevent runaway acceleration */
 {

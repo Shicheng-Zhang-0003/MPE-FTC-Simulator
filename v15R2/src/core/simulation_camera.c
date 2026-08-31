@@ -33,7 +33,13 @@ void simulation_camera_tick(float frame_delta_time) {
     }
 
     /* IJKL emulation (Debug Mode) */
+    /* MFS_127_CAMERA_FLOAT_FIX: Reset vertical velocity when entering debug mode
+     * to prevent camera from floating upward due to residual game-mode velocity. */
     if (main_inputs.is_debug_mode_active) {
+        /* Reset vertical velocity if not actively controlled */
+        if (!main_inputs.space_key_pressed && !main_inputs.shift_key_pressed) {
+            main_camera_fov.vertical_velocity = 0.0f;
+        }
         float debug_speed = main_camera_fov.movement_speed * frame_delta_time;
         if (main_inputs.w_key_pressed) {
             main_camera_fov.position = vector3_addition(
