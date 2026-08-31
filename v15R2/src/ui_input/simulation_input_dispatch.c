@@ -32,8 +32,7 @@ void simulation_input_dispatch(GtkWidget *parent_window) {
                 main_inputs.object_menu_level = 1;
             }
         }
-        main_inputs.h_key_pressed = false;
-        config_menu_close();
+            config_menu_close();
     }
     if (main_inputs.f_key_pressed) {
         if (selected_object >= 0) {
@@ -115,13 +114,7 @@ void simulation_input_dispatch(GtkWidget *parent_window) {
         if (main_inputs.h_key_pressed) { kb_rotate  -= 1.0f; } /* FIX 113: H=rotate right */
         /* ALWAYS apply drive — zeros motors when no keys pressed */
         gui_robot_apply_drive(kb_forward, kb_strafe, kb_rotate);
-        main_inputs.g_key_pressed = false;
-        main_inputs.v_key_pressed = false;
-        main_inputs.b_key_pressed = false;
-        main_inputs.n_key_pressed = false;
-        main_inputs.c_key_pressed = false;
-        main_inputs.h_key_pressed = false;
-    }
+                            }
 
 /* Spawn gun (Enter hold) */
     static float enter_hold_timer = 0.0f;

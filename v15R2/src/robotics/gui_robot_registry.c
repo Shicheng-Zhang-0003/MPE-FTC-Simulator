@@ -76,49 +76,57 @@ int gui_robot_spawn(float x, float y, float z, motor_preset_id preset) {
 }
 
 void gui_robot_tick(float dt) {
-    if ((mfs_gui_robot_count <= 0) || (!mfs_gui_robot_world)) {
-        return;
-    }
+if ((mfs_gui_robot_count <= 0) || (!mfs_gui_robot_world)) {
+return;
+}
+/* MFS_122: Fixed-timestep accumulator for deterministic robot physics.
+* The robot world steps at 60 Hz regardless of render framerate. */
+static float robot_accumulator = 0.0f;
+const float fixed_robot_dt = 1.0f / 60.0f;
+const float max_frame_time = fixed_robot_dt * 5.0f;
 
-    for (int i = 0; i < mfs_gui_robot_count; i++) {
-        drivetrain_update(mfs_gui_robot_world, &mfs_gui_robots[i], dt);
-    }
+robot_accumulator += dt;
+if (robot_accumulator > max_frame_time) {
+robot_accumulator = max_frame_time;
+}
 
-    /* Step the robot's physics world */
-    physics_world_step(mfs_gui_robot_world, dt);
-
-    /* --- Sync visual proxies from physics world --- */
-    for (int i = 0; i < mfs_gui_robot_count; i++) {
-        ftc_robot *robot = &mfs_gui_robots[i];
-        gui_robot_proxy *proxy = &mfs_gui_proxies[i];
-
-        /* Sync chassis */
-        if ((proxy->chassis_proxy >= 0) && (proxy->chassis_proxy < object_count)) {
-            int chassis_body = robot->chassis_body;
-            if ((chassis_body >= 0) && (chassis_body < mfs_gui_robot_world->body_count)) {
-                rigidbody *src = &mfs_gui_robot_world->bodies[chassis_body];
-                rigidbody *dst = &obj_per_scene[proxy->chassis_proxy];
-                dst->position = src->position;
-                dst->orientation = src->orientation;
-                rigidbody_update_axes(dst);
-            }
-        }
-
-        /* Sync wheels */
-        for (int w = 0; w < robot->wheel_count; w++) {
-            int proxy_idx = proxy->wheel_proxies[w];
-            if ((proxy_idx >= 0) && (proxy_idx < object_count)) {
-                int wheel_body = robot->wheel_bodies[w];
-                if ((wheel_body >= 0) && (wheel_body < mfs_gui_robot_world->body_count)) {
-                    rigidbody *src = &mfs_gui_robot_world->bodies[wheel_body];
-                    rigidbody *dst = &obj_per_scene[proxy_idx];
-                    dst->position = src->position;
-                    dst->orientation = src->orientation;
-                    rigidbody_update_axes(dst);
-                }
-            }
-        }
-    }
+while (robot_accumulator >= fixed_robot_dt) {
+for (int i = 0; i < mfs_gui_robot_count; i++) {
+drivetrain_update(mfs_gui_robot_world, &mfs_gui_robots[i], fixed_robot_dt);
+}
+physics_world_step(mfs_gui_robot_world, fixed_robot_dt);
+robot_accumulator -= fixed_robot_dt;
+}
+/* --- Sync visual proxies from physics world --- */
+for (int i = 0; i < mfs_gui_robot_count; i++) {
+ftc_robot *robot = &mfs_gui_robots[i];
+gui_robot_proxy *proxy = &mfs_gui_proxies[i];
+/* Sync chassis */
+if ((proxy->chassis_proxy >= 0) && (proxy->chassis_proxy < object_count)) {
+int chassis_body = robot->chassis_body;
+if ((chassis_body >= 0) && (chassis_body < mfs_gui_robot_world->body_count)) {
+rigidbody *src = &mfs_gui_robot_world->bodies[chassis_body];
+rigidbody *dst = &obj_per_scene[proxy->chassis_proxy];
+dst->position = src->position;
+dst->orientation = src->orientation;
+rigidbody_update_axes(dst);
+}
+}
+/* Sync wheels */
+for (int w = 0; w < robot->wheel_count; w++) {
+int proxy_idx = proxy->wheel_proxies[w];
+if ((proxy_idx >= 0) && (proxy_idx < object_count)) {
+int wheel_body = robot->wheel_bodies[w];
+if ((wheel_body >= 0) && (wheel_body < mfs_gui_robot_world->body_count)) {
+rigidbody *src = &mfs_gui_robot_world->bodies[wheel_body];
+rigidbody *dst = &obj_per_scene[proxy_idx];
+dst->position = src->position;
+dst->orientation = src->orientation;
+rigidbody_update_axes(dst);
+}
+}
+}
+}
 }
 
 void gui_robot_apply_drive(float forward, float strafe, float rotate) {

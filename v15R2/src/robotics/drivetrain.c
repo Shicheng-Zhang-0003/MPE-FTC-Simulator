@@ -132,9 +132,22 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
                 vector3 lat = {v.x, 0.0f, v.z};
                 chassis->force_accumulator = vector3_subtraction(
                     chassis->force_accumulator,
-                    vector3_scaling(lat, m * 3.0f));
+                    vector3_scaling(lat, m * 2.0f) /* MFS_124: balanced damping */ /* MFS_122: reduced from 3.0 */);
                 float yaw_vel = chassis->angular_velocity.y;
-                chassis->torque_accumulator.y -= yaw_vel * m * 1.5f * 0.02f;
+                chassis->torque_accumulator.y -= yaw_vel * m * 1.0f * 0.02f /* MFS_124: balanced yaw damping */;
+
+/* MFS_124_VELOCITY_CAP: prevent runaway acceleration */
+{
+    float speed_sq = chassis->velocity.x * chassis->velocity.x +
+                     chassis->velocity.z * chassis->velocity.z;
+    float max_speed = 3.0f; /* m/s cap */
+    if (speed_sq > max_speed * max_speed) {
+        float speed = sqrtf(speed_sq);
+        float scale = max_speed / speed;
+        chassis->velocity.x *= scale;
+        chassis->velocity.z *= scale;
+    }
+}
             }
         }
     }

@@ -253,13 +253,12 @@ if ((event -> keyval == GDK_KEY_t) || (event -> keyval == GDK_KEY_T)) {input_sta
     if (event -> keyval == GDK_KEY_l) {input_state -> l_key_pressed = false;}
     if ((event -> keyval == GDK_KEY_q) || (event -> keyval == GDK_KEY_Q)) {input_state -> q_key_pressed = false;} /* MFS_GUI_BRIDGE_Q_KEY */
     if (event -> keyval == GDK_KEY_g) {input_state -> g_key_pressed = false;} /* MFS_GUI_BRIDGE */
-    if (event -> keyval == GDK_KEY_h) {input_state -> h_key_pressed = false;
-    input_state -> c_key_pressed = false;
-    input_state -> v_key_pressed = false;
-    input_state -> b_key_pressed = false;
-    input_state -> n_key_pressed = false;} /* MFS_GUI_BRIDGE */
-    if (event -> keyval == GDK_KEY_Shift_L) {input_state -> shift_key_pressed = false;}
-    if (event -> keyval == GDK_KEY_space) {input_state -> space_key_pressed = false;}
+    if (event -> keyval == GDK_KEY_g) {input_state -> g_key_pressed = false;}
+    if (event -> keyval == GDK_KEY_h) {input_state -> h_key_pressed = false;}
+    if (event -> keyval == GDK_KEY_c) {input_state -> c_key_pressed = false;}
+    if (event -> keyval == GDK_KEY_v) {input_state -> v_key_pressed = false;}
+    if (event -> keyval == GDK_KEY_b) {input_state -> b_key_pressed = false;}
+    if (event -> keyval == GDK_KEY_n) {input_state -> n_key_pressed = false;} /* MFS_124_FIX */
 /* MPE_TASK_22_ENTER_SPAWN_KEYRELEASE_BEGIN */
 if ((event -> keyval == GDK_KEY_Return) || (event -> keyval == GDK_KEY_KP_Enter)) {
 input_state -> enter_spawn_held = false;
