@@ -123,21 +123,21 @@ void ftc_robot_update(physics_world *world, ftc_robot *robot, float dt) {
         }
         rigidbody *wheel = &world->bodies[wheel_idx];
 
-        /* Read wheel angular velocity about the axle axis */
-        vector3 axle = {robot->axle_axis_x, robot->axle_axis_y, robot->axle_axis_z};
-        float wheel_speed = wheel->angular_velocity.x * axle.x + wheel->angular_velocity.y * axle.y +
-                            wheel->angular_velocity.z * axle.z;
+        /* Read wheel angular velocity about the actual rotated axle axis in world space */
+        vector3 axle = wheel->cached_axes[0];
+        if (vector3_length_squared(axle) < 0.0001f) {
+            axle = vector4_rotate_to_vector3(wheel->orientation, (vector3){1.0f, 0.0f, 0.0f});
+        }
+        float wheel_speed = vector3_dot(wheel->angular_velocity, axle);
 
         /* Update motor electrical state */
         motor_update(&robot->wheel_motors[i], wheel_speed, dt, terminal_voltage);
 
-        /* Apply motor torque to wheel body */
+        /* Apply motor torque along the actual physical axle in world space */
         float torque = robot->wheel_motors[i].output_torque;
-        wheel->torque_accumulator.x += axle.x * torque;
-        wheel->torque_accumulator.y += axle.y * torque;
-        wheel->torque_accumulator.z += axle.z * torque;
-        /* MPE_FTC_076: raycast traction augments contact friction */
-        //Retired 076
+        wheel->torque_accumulator = vector3_addition(
+            wheel->torque_accumulator,
+            vector3_scaling(axle, torque));
         rigidbody_wake(wheel); /* MPE_FTC_078: keep driven wheels awake so motor torque is applied */
     }
 }

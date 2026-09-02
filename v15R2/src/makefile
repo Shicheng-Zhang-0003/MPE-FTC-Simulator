@@ -19,7 +19,7 @@ $(BUILD_DIR)/%.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -rf $(BUILD_DIR) engine
+	rm -rf $(BUILD_DIR) engine test_*
 
 .PHONY: clean
 
@@ -29,7 +29,7 @@ clean:
 TWO_WORLD_SOURCES := tests/two_world_test.c core/physics_world.c core/rigidbody.c \
 	physics/collision_mechanics.c physics/broadphase.c physics/constraint.c physics/revolute_joint.c \
 	config/mpe_config.c config/mpe_config_schema.c
-test_two_world:
+test_two_world: $(TWO_WORLD_SOURCES)
 	$(CC) $(CFLAGS) -DMPE_TWO_WORLD_TEST $(TWO_WORLD_SOURCES) -lm -o test_two_world
 	./test_two_world
 
@@ -37,7 +37,7 @@ test_two_world:
 REVOLUTE_TEST_SOURCES := tests/revolute_test.c core/physics_world.c core/rigidbody.c \
 	physics/collision_mechanics.c physics/broadphase.c physics/constraint.c physics/revolute_joint.c \
 	config/mpe_config.c config/mpe_config_schema.c
-test_revolute:
+test_revolute: $(REVOLUTE_TEST_SOURCES)
 	$(CC) $(CFLAGS) -DMPE_REVOLUTE_TEST $(REVOLUTE_TEST_SOURCES) -lm -o test_revolute
 	./test_revolute
 
@@ -46,12 +46,12 @@ TELEOP_TEST_SOURCES := tests/teleop_drive_test.c core/physics_world.c core/rigid
 	physics/collision_mechanics.c physics/broadphase.c physics/constraint.c physics/revolute_joint.c \
 	robotics/motor.c robotics/motor_presets.c robotics/battery.c robotics/robot.c robotics/drivetrain.c \
 	config/mpe_config.c config/mpe_config_schema.c
-test_teleop_drive:
+test_teleop_drive: $(TELEOP_TEST_SOURCES)
 	$(CC) $(CFLAGS) -DMPE_TELEOP_DRIVE_TEST $(TELEOP_TEST_SOURCES) -lm -o test_teleop_drive
 	./test_teleop_drive
 
 # MPE_FTC_078: ASan+UBSan teleop drive test for heap-corruption diagnosis
-test_teleop_drive_asan:
+test_teleop_drive_asan: $(TELEOP_TEST_SOURCES)
 	$(CC) $(CFLAGS) -O1 -g -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer \
 	  -DMPE_TELEOP_DRIVE_TEST $(TELEOP_TEST_SOURCES) -lm \
 	  -fsanitize=address -fsanitize=undefined -o test_teleop_drive_asan
@@ -62,7 +62,7 @@ MECANUM_TEST_SOURCES := tests/mecanum_drive_test.c core/physics_world.c core/rig
 	physics/collision_mechanics.c physics/broadphase.c physics/constraint.c physics/revolute_joint.c \
 	robotics/motor.c robotics/motor_presets.c robotics/battery.c robotics/robot.c robotics/drivetrain.c \
 	config/mpe_config.c config/mpe_config_schema.c
-test_mecanum_drive:
+test_mecanum_drive: $(MECANUM_TEST_SOURCES)
 	$(CC) $(CFLAGS) -DMPE_MECANUM_DRIVE_TEST $(MECANUM_TEST_SOURCES) -lm -o test_mecanum_drive
 	./test_mecanum_drive
 
@@ -93,7 +93,7 @@ FTC_INTEGRATION_SOURCES := tests/ftc_integration_test.c core/physics_world.c cor
 	robotics/motor.c robotics/motor_presets.c robotics/battery.c robotics/robot.c robotics/drivetrain.c \
 	config/mpe_config.c config/mpe_config_schema.c
 
-test_ftc_integration:
+test_ftc_integration: $(FTC_INTEGRATION_SOURCES)
 	$(CC) $(CFLAGS) -DMPE_FTC_INTEGRATION_TEST $(FTC_INTEGRATION_SOURCES) -lm -o test_ftc_integration
 	./test_ftc_integration
 
@@ -103,6 +103,6 @@ FTC_DEBUG_SOURCES := tests/ftc_debug_test.c core/physics_world.c core/rigidbody.
 	robotics/motor.c robotics/motor_presets.c robotics/battery.c robotics/robot.c robotics/drivetrain.c \
 	config/mpe_config.c config/mpe_config_schema.c
 
-test_ftc_debug:
+test_ftc_debug: $(FTC_DEBUG_SOURCES)
 	$(CC) $(CFLAGS) -DMPE_FTC_DEBUG_TEST $(FTC_DEBUG_SOURCES) -lm -o test_ftc_debug
 	./test_ftc_debug

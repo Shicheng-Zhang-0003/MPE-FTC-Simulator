@@ -972,8 +972,10 @@ void collision_prepare_solver(collision_data *source, collision_data *m) {
 
         }
         
-        if (!mecanum_tangent_set && tangent_speed > 0.0001f) {
-            cp->tangent_vector = vector3_scaling(rel_vel_tangent, -1.0f / tangent_speed);
+        if (mecanum_tangent_set || tangent_speed > 0.0001f) {
+            if (!mecanum_tangent_set) {
+                cp->tangent_vector = vector3_scaling(rel_vel_tangent, -1.0f / tangent_speed);
+            }
             vector3 ra_cross_t = vector3_cross(cp->ra, cp->tangent_vector);
             vector3 rb_cross_t = vector3_cross(cp->rb, cp->tangent_vector);
             vector3 ang_a_t =
@@ -983,7 +985,7 @@ void collision_prepare_solver(collision_data *source, collision_data *m) {
             float k_tangent = m->object_a->inverse_mass + m->object_b->inverse_mass +
                               vector3_dot(vector3_addition(ang_a_t, ang_b_t), cp->tangent_vector);
             cp->effective_mass_tangent = (k_tangent > 0.0f) ? (1.0f / k_tangent) : 0.0f;
-        } else if (!mecanum_tangent_set) {
+        } else {
             cp->tangent_vector = vector3_zero();
             cp->effective_mass_tangent = 0.0f;
         }
