@@ -132,9 +132,45 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
                 vector3 lat = {v.x, 0.0f, v.z};
                 chassis->force_accumulator = vector3_subtraction(
                     chassis->force_accumulator,
-                    vector3_scaling(lat, m * 2.0f) /* MFS_124: balanced damping */ /* MFS_122: reduced from 3.0 */);
+                    vector3_scaling(lat, m * 1.0f) /* MFS_132_DAMPING_TRUTH: PHYSICS LIE — artificial lateral damping. Real lateral resistance comes from wheel-floor friction. Reduce further once contact solver is stable enough. */ /* MFS_122: reduced from 3.0 */);
                 float yaw_vel = chassis->angular_velocity.y;
                 chassis->torque_accumulator.y -= yaw_vel * m * 1.5f * 0.02f /* MFS_127: increased from 1.0 to stop residual rotation */ /* MFS_124: balanced yaw damping */;
+                /* MFS_146_IDLE_HOLD: an unpowered real robot's drivetrain (gearbox
+                 * back-drive friction + motor cogging) resists motion, holding position
+                 * instead of drifting from mecanum contact asymmetry. Model as strong
+                 * horizontal chassis damping when all wheel commands are ~0 and the robot
+                 * is nearly stopped. The <0.25 m/s gate leaves normal high-speed coast-down
+                 * to back-EMF + rolling resistance. */
+                {
+                    int mfs_idle = 1;
+                    for (int mfs_wi = 0; mfs_wi < robot->wheel_count; mfs_wi++) {
+                        if (fabsf(robot->wheel_motors[mfs_wi].command) > 0.05f) { mfs_idle = 0; break; }
+                    }
+                    if (mfs_idle) {
+                        int mfs_cidx = robot->chassis_body;
+                        if ((mfs_cidx >= 0) && (mfs_cidx < world->body_count)) {
+                            rigidbody *mfs_chassis = &world->bodies[mfs_cidx];
+                            float mfs_hvx = mfs_chassis->velocity.x;
+                            float mfs_hvz = mfs_chassis->velocity.z;
+                            float mfs_hs = sqrtf((mfs_hvx * mfs_hvx) + (mfs_hvz * mfs_hvz));
+                            if (mfs_hs > 0.0001f) {
+                                /* MFS_147_COULOMB_HOLD: viscous damping alone only reaches a terminal
+                                 * drift against the constant mecanum contact asymmetry. A real gearbox's
+                                 * back-drive friction is ~constant (Coulomb) and is what actually holds
+                                 * the robot. Add a Coulomb term that exceeds the asymmetry force; clamp
+                                 * the total to the one-step stopping force so it can never reverse the
+                                 * chassis (no oscillation). */
+                                float mfs_viscous = mfs_hs * 8.0f * mfs_chassis->mass;
+                                float mfs_coulomb = 2.0f;
+                                float mfs_total = mfs_viscous + mfs_coulomb;
+                                float mfs_f_stop = mfs_chassis->mass * mfs_hs / dt;
+                                if (mfs_total > mfs_f_stop) { mfs_total = mfs_f_stop; }
+                                mfs_chassis->force_accumulator.x -= (mfs_hvx / mfs_hs) * mfs_total;
+                                mfs_chassis->force_accumulator.z -= (mfs_hvz / mfs_hs) * mfs_total;
+                            }
+                        }
+                    }
+                }
 
 /* MFS_124_VELOCITY_CAP: prevent runaway acceleration */
 {
@@ -151,6 +187,48 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
             }
         }
     }
+
+/* MFS_132_ROLLING_RESISTANCE: apply small opposing torque to spinning
+* wheels in contact with the floor. Simulates realistic coast-down.
+* Only applies when motor command is near-zero (free-rolling). */
+{
+float c_rr = g_cfg.world.rolling_resistance_coeff; /* MFS_141: real config param, default 0.02 */
+if ((c_rr > 0.0f) && (robot->wheel_count > 0)) {
+float total_mass = 0.0f;
+int chassis_ok = ((robot->chassis_body >= 0) &&
+(robot->chassis_body < world->body_count));
+if (chassis_ok) { total_mass += world->bodies[robot->chassis_body].mass; }
+for (int i = 0; i < robot->wheel_count; i++) {
+int wi = robot->wheel_bodies[i];
+if ((wi >= 0) && (wi < world->body_count)) {
+total_mass += world->bodies[wi].mass;
+}
+}
+float g_mag = 9.81f;
+if (g_cfg.world.gravity < 0.0f) { g_mag = -g_cfg.world.gravity; }
+float n_per_wheel = (total_mass * g_mag) / (float) robot->wheel_count;
+for (int i = 0; i < robot->wheel_count; i++) {
+int wi = robot->wheel_bodies[i];
+if ((wi < 0) || (wi >= world->body_count)) { continue; }
+rigidbody *wheel = &world->bodies[wi];
+/* Only apply when motor command is near-zero (free-rolling) */
+if (fabsf(robot->wheel_motors[i].command) > 0.05f) { continue; }
+float r = wheel->radius;
+if (r <= 0.001f) { continue; }
+/* Rolling resistance force opposing rotation about axle */
+vector3 axle = wheel->cached_axes[0];
+float omega_axle = vector3_dot(wheel->angular_velocity, axle);
+if (fabsf(omega_axle) < 0.01f) { continue; }
+float f_rr = c_rr * n_per_wheel;
+float torque_rr = f_rr * r;
+/* Apply opposing torque about axle */
+float sign = (omega_axle > 0.0f) ? -1.0f : 1.0f;
+vector3 rr_torque = vector3_scaling(axle, sign * torque_rr);
+wheel->torque_accumulator = vector3_addition(wheel->torque_accumulator, rr_torque);
+}
+}
+}
+
 #endif /* MPE_DRIVETRAIN_REAL */
 
 

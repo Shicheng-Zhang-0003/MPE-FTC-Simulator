@@ -43,6 +43,8 @@ static mpe_param s_registry[] = {
 
     {"world.floor_friction_k", "Floor Friction (Kinetic)", "Kinetic friction coefficient for floor contacts", p_float,
      cat_world, &g_cfg.world.floor_friction_k, 0.1, 0.0, 5.0, false},
+     {"world.rolling_resistance_coeff", "Rolling Resistance Coeff", "Rolling resistance coefficient for wheels on floor (0 = free roll)", p_float,
+     cat_world, &g_cfg.world.rolling_resistance_coeff, 0.02f, 0.0, 5.0, false},
 
     /* ============================================================
      * cat_timestep

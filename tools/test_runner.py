@@ -28,6 +28,7 @@ KNOWN_TESTS = [
     "driven_wheel",
     "math3_inverse",
     "ftc_integration",
+    "physics_truth",
 ]
 
 # Tests that encode desired future behavior but are currently expected

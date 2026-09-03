@@ -47,6 +47,7 @@ typedef struct {
         float drag;
         float floor_friction_s;
         float floor_friction_k;
+    float rolling_resistance_coeff; /* MFS_132 */
     } world;
 
     struct {

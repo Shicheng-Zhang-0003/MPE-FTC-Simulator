@@ -106,3 +106,56 @@ FTC_DEBUG_SOURCES := tests/ftc_debug_test.c core/physics_world.c core/rigidbody.
 test_ftc_debug: $(FTC_DEBUG_SOURCES)
 	$(CC) $(CFLAGS) -DMPE_FTC_DEBUG_TEST $(FTC_DEBUG_SOURCES) -lm -o test_ftc_debug
 	./test_ftc_debug
+
+# MFS_133: Full physics truth test suite
+PHYSICS_TRUTH_SOURCES := tests/physics_truth_test.c core/physics_world.c core/rigidbody.c \
+physics/collision_mechanics.c physics/broadphase.c physics/constraint.c physics/revolute_joint.c \
+robotics/motor.c robotics/motor_presets.c robotics/battery.c robotics/robot.c robotics/drivetrain.c \
+config/mpe_config.c config/mpe_config_schema.c
+test_physics_truth: $(PHYSICS_TRUTH_SOURCES)
+	$(CC) $(CFLAGS) -DMPE_PHYSICS_TRUTH_TEST $(PHYSICS_TRUTH_SOURCES) -lm -o test_physics_truth
+	./test_physics_truth
+
+# MFS_135: diagnostic
+DIAG_SOURCES := tests/physics_truth_diag.c core/physics_world.c core/rigidbody.c \
+physics/collision_mechanics.c physics/broadphase.c physics/constraint.c physics/revolute_joint.c \
+robotics/motor.c robotics/motor_presets.c robotics/battery.c robotics/robot.c robotics/drivetrain.c \
+config/mpe_config.c config/mpe_config_schema.c
+test_physics_truth_diag: $(DIAG_SOURCES)
+	$(CC) $(CFLAGS) -DMPE_PHYSICS_TRUTH_DIAG $(DIAG_SOURCES) -lm -o test_physics_truth_diag
+	./test_physics_truth_diag
+
+# MFS_138: floor collision diagnostic
+FLOOR_DIAG_SOURCES := tests/floor_collision_diag.c core/physics_world.c core/rigidbody.c \
+physics/collision_mechanics.c physics/broadphase.c physics/constraint.c physics/revolute_joint.c \
+config/mpe_config.c config/mpe_config_schema.c
+test_floor_collision_diag: $(FLOOR_DIAG_SOURCES)
+	$(CC) $(CFLAGS) -DMPE_FLOOR_DIAG $(FLOOR_DIAG_SOURCES) -lm -o test_floor_collision_diag
+	./test_floor_collision_diag
+
+# MFS_142: idle wheel-spin diagnostic
+IDLE_DIAG_SOURCES := tests/idle_spin_diag.c core/physics_world.c core/rigidbody.c \
+physics/collision_mechanics.c physics/broadphase.c physics/constraint.c physics/revolute_joint.c \
+robotics/motor.c robotics/motor_presets.c robotics/battery.c robotics/robot.c robotics/drivetrain.c \
+config/mpe_config.c config/mpe_config_schema.c
+test_idle_spin_diag: $(IDLE_DIAG_SOURCES)
+	$(CC) $(CFLAGS) -DMFS_IDLE_DIAG $(IDLE_DIAG_SOURCES) -lm -o test_idle_spin_diag
+	./test_idle_spin_diag
+
+# MFS_143: deep idle-spin diagnostic
+IDLE_DEEP_SOURCES := tests/idle_spin_deep_diag.c core/physics_world.c core/rigidbody.c \
+physics/collision_mechanics.c physics/broadphase.c physics/constraint.c physics/revolute_joint.c \
+robotics/motor.c robotics/motor_presets.c robotics/battery.c robotics/robot.c robotics/drivetrain.c \
+config/mpe_config.c config/mpe_config_schema.c
+test_idle_spin_deep_diag: $(IDLE_DEEP_SOURCES)
+	$(CC) $(CFLAGS) -DMFS_IDLE_DEEP_DIAG $(IDLE_DEEP_SOURCES) -lm -o test_idle_spin_deep_diag
+	./test_idle_spin_deep_diag
+
+# MFS_148: idle root-cause diagnostic
+IDLE_RC_SOURCES := tests/idle_rootcause_diag.c core/physics_world.c core/rigidbody.c \
+physics/collision_mechanics.c physics/broadphase.c physics/constraint.c physics/revolute_joint.c \
+robotics/motor.c robotics/motor_presets.c robotics/battery.c robotics/robot.c robotics/drivetrain.c \
+config/mpe_config.c config/mpe_config_schema.c
+test_idle_rootcause_diag: $(IDLE_RC_SOURCES)
+	$(CC) $(CFLAGS) -DMFS_IDLE_ROOTCAUSE_DIAG $(IDLE_RC_SOURCES) -lm -o test_idle_rootcause_diag
+	./test_idle_rootcause_diag

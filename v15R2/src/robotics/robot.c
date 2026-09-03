@@ -135,6 +135,20 @@ void ftc_robot_update(physics_world *world, ftc_robot *robot, float dt) {
 
         /* Apply motor torque along the actual physical axle in world space */
         float torque = robot->wheel_motors[i].output_torque;
+        /* MFS_145_IDLE_BRAKE: back-EMF braking is a damper — it brings a coasting
+         * wheel to rest and can never reverse it (no back-EMF once stopped).
+         * At idle, clamp the braking torque to the amount that stops the wheel
+         * within this timestep. Without this, the stall-clamped back-EMF torque
+         * (~2.17 N·m) reverses the light wheel every step -> ±25 rad/s idle spin. */
+        if ((fabsf(robot->wheel_motors[i].command) < 0.05f) && ((torque * wheel_speed) < 0.0f)) {
+            float mfs_i_axle = 0.5f * wheel->mass * wheel->radius * wheel->radius;
+            if (mfs_i_axle > 0.0f) {
+                float mfs_max_brake = mfs_i_axle * fabsf(wheel_speed) / dt;
+                if (fabsf(torque) > mfs_max_brake) {
+                    torque = (torque > 0.0f) ? mfs_max_brake : -mfs_max_brake;
+                }
+            }
+        }
         wheel->torque_accumulator = vector3_addition(
             wheel->torque_accumulator,
             vector3_scaling(axle, torque));
