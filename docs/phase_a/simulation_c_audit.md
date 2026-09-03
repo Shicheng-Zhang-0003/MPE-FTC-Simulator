@@ -1,3 +1,10 @@
+> ⚠️ **STALE DOCUMENT** — This audit was taken before the increment split.
+> `simulation.c` has since been reduced from 1123 lines to ~130 lines.
+> All 16 functions listed here have been extracted into 9 separate modules.
+> This document is retained for historical reference only.
+
+---
+
 # simulation.c Responsibility Map (Phase A audit)
 
 - Total lines: **1123**
