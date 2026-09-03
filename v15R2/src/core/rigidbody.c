@@ -467,7 +467,6 @@ void rigidbody_set_static(rigidbody *rigid_body, bool make_static) {
             rigidbody_update_inertia_sphere(rigid_body);
     } else if (rigid_body->type == object_cylinder) { /* MPE_FTC_091 */
         rigidbody_update_inertia_cylinder(rigid_body);
-    } else if (rigid_body->type == object_cylinder) { /* MPE_FTC_093d */
         rigidbody_update_inertia_cylinder(rigid_body);
     } else {
             rigidbody_update_inertia_cube(rigid_body);

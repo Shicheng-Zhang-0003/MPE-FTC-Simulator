@@ -3,13 +3,34 @@
 #define physics_world_h
 
 #include "rigidbody.h"
+#include "../config/mpe_constants.h" /* MFS_131 */
 #include <stdint.h>
 
+/* MFS_131A: warm-start contact cache entry. Moved here from
+ * collision_mechanics.c so physics_world can own a per-world cache
+ * (Milestone 3, item 101). */
 typedef struct {
+    uint32_t object_id_a;
+    uint32_t object_id_b;
+    vector3 local_position_a;
+    vector3 local_position_b;
+    float accumulated_normal_impulse;
+    float accumulated_tangent_impulse;
+    uint32_t property_stamp_a;
+    uint32_t property_stamp_b;
+} cached_contact;
+
+typedef struct physics_world {
     rigidbody *bodies;
     int body_count;
     int body_capacity;
     uint32_t next_object_id;
+    /* MFS_131A: per-world warm-start cache. Heap-allocated in
+     * physics_world_init (an inline array would be ~3 MB and would
+     * overflow the stack of tests that declare worlds locally).
+     * NULL-world callers fall back to the global cache. */
+    cached_contact *world_contact_cache;
+    int world_contact_cache_count;
 } physics_world;
 
 void physics_world_init(physics_world *world);

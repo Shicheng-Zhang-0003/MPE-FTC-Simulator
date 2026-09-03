@@ -719,7 +719,7 @@ static void term_set_object_mass(int object_index, float new_mass) {
         }
         rigidbody_wake(rigid_body);
     }
-    contact_cache_clear();
+    contact_cache_clear(NULL);
 }
 static void term_set_object_static(int object_index, bool make_static) {
     if ((object_index < 0) || (object_index >= object_count)) {
@@ -727,7 +727,7 @@ static void term_set_object_static(int object_index, bool make_static) {
     }
     rigidbody *rigid_body = &obj_per_scene[object_index];
     rigidbody_set_static(rigid_body, make_static);
-    contact_cache_clear();
+    contact_cache_clear(NULL);
 }
 static bool term_mode_is_static(const char *mode_text) {
     if (term_str_eq(mode_text, "static")) {
@@ -970,7 +970,7 @@ static void cmd_rm(int argc, char **argv) {
             } else {
                 scene_clear();
                 clear_selection();
-                contact_cache_clear();
+                contact_cache_clear(NULL);
                 main_inputs.object_menu_level = 0;
                 main_inputs.marked_joint_object_index = -1;
                 main_inputs.is_menu_open = false;
@@ -1167,7 +1167,7 @@ static void cmd_kill(int argc, char **argv) {
             } else {
                 scene_clear();
                 clear_selection();
-                contact_cache_clear();
+                contact_cache_clear(NULL);
                 main_inputs.object_menu_level = 0;
                 main_inputs.marked_joint_object_index = -1;
                 main_inputs.is_menu_open = false;
@@ -1479,14 +1479,14 @@ static void cmd_config(int argc, char **argv) {
         }
     } else if (term_str_eq(argv[1], "load")) {
         if (mpe_config_load("status/engine.cfg")) {
-            contact_cache_clear();
+            contact_cache_clear(NULL);
             term_ok("config loaded from status/engine.cfg\n");
         } else {
             term_err("mpe: config: load failed (file missing?)\n");
         }
     } else if (term_str_eq(argv[1], "reset")) {
         mpe_config_reset_defaults();
-        contact_cache_clear();
+        contact_cache_clear(NULL);
         term_ok("config reset to defaults\n");
     } else {
         term_err("mpe: config: unknown subcommand. Use save|load|reset\n");
@@ -1527,7 +1527,7 @@ static void cmd_reboot(int argc, char **argv) {
     (void) argv;
     scene_clear();
     clear_selection();
-    contact_cache_clear();
+    contact_cache_clear(NULL);
     editor_reset();
     scene_init_default();
     term_ok("System rebooted.\n");
@@ -2414,7 +2414,7 @@ static void cmd_sed(int argc, char **argv) {
                 }
                 modified_count++;
             }
-            contact_cache_clear();
+            contact_cache_clear(NULL);
             continue;
         }
         int object_index = term_object_from_token(target);
@@ -2487,7 +2487,7 @@ static void cmd_sed(int argc, char **argv) {
             continue;
         }
         modified_count++;
-        contact_cache_clear();
+        contact_cache_clear(NULL);
         term_printf("term_ok", "/obj/%d: %s=%s\n", object_index, field_name, value_str);
     }
     if (all_targets_matched_any(argc, argv)) {
@@ -2575,7 +2575,7 @@ static void cmd_mount(int argc, char **argv) {
     const char *scene_path = argv[1];
     if (scene_loading(scene_path)) {
         editor_reset();
-        contact_cache_clear();
+        contact_cache_clear(NULL);
         term_printf("term_ok", "mounted %s: %d objects loaded\n", scene_path, object_count);
         event_log_push(log_info, "Scene mounted via terminal: %s", scene_path);
     } else {
@@ -2593,7 +2593,7 @@ static void cmd_umount(int argc, char **argv) {
     }
     scene_clear();
     clear_selection();
-    contact_cache_clear();
+    contact_cache_clear(NULL);
     editor_reset();
     term_ok("umount: scene cleared\n");
     event_log_push(log_info, "Scene unmounted via terminal");
@@ -2603,7 +2603,7 @@ static void cmd_mkfs(int argc, char **argv) {
     (void) argv;
     scene_clear();
     clear_selection();
-    contact_cache_clear();
+    contact_cache_clear(NULL);
     editor_reset();
     term_printf("term_ok", "Scene formatted. 0 objects, 0 joints.\n");
     event_log_push(log_info, "Scene formatted via terminal (mkfs)");
@@ -2700,7 +2700,7 @@ static void cmd_fsck(int argc, char **argv) {
         }
     }
     if (auto_fix) {
-        contact_cache_clear();
+        contact_cache_clear(NULL);
     }
     if (error_count == 0) {
         term_printf("term_ok", "fsck: PASS — %d objects, %d joints, %d warning(s), 0 errors\n", object_count,

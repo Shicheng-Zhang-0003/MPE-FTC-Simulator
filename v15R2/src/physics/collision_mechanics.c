@@ -1,20 +1,9 @@
 #include "../mpe_engine.h"
 #include "collision_mechanics.h"
+#include "../core/physics_world.h" /* MFS_131 */
 #include <stdint.h>
 #include <stdlib.h>
 
-typedef struct {
-    uint32_t object_id_a; /* A3_PATCH_10_CONTACT_CACHE_IDS */
-    uint32_t object_id_b;
-    vector3 local_position_a;
-    vector3 local_position_b;
-    float accumulated_normal_impulse;
-    float accumulated_tangent_impulse;
-    /* MPE_TASK_05_CACHE_STAMP_BEGIN */
-    uint32_t property_stamp_a;
-    uint32_t property_stamp_b;
-    /* MPE_TASK_05_CACHE_STAMP_END */
-} cached_contact;
 
 static cached_contact contact_impulse_cache[max_cached_contacts];
 static int contact_impulse_cache_count = 0;
@@ -1105,16 +1094,27 @@ void collision_resolve_iterative(collision_data *m) {
     }
 }
 
-void contact_cache_save(collision_data *manifolds, int count) {
-    contact_impulse_cache_count = 0;
+void contact_cache_save(struct physics_world *world, collision_data *manifolds, int count) {
+    /* MFS_131A: per-world warm-start cache.
+     * world == NULL (legacy GUI path) falls back to the global cache. */
+    int *cache_count;
+    cached_contact *cache_array;
+    if ((world) && (world->world_contact_cache)) {
+        cache_count = &world->world_contact_cache_count;
+        cache_array = world->world_contact_cache;
+    } else {
+        cache_count = &contact_impulse_cache_count;
+        cache_array = contact_impulse_cache;
+    }
+    *cache_count = 0;
     for (int m = 0; m < count; m++) {
         collision_data *manifold = &manifolds[m];
         for (int i = 0; i < manifold->contact_count; i++) {
-            if (contact_impulse_cache_count >= max_cached_contacts) {
+            if (*cache_count >= max_cached_contacts) {
                 return;
             }
             contact_point_data *cp = &manifold->contacts[i];
-            cached_contact *cc = &contact_impulse_cache[contact_impulse_cache_count++];
+            cached_contact *cc = &cache_array[(*cache_count)++];
             cc->object_id_a = (manifold->object_a) ? manifold->object_a->object_id : 0;
             cc->object_id_b = (manifold->object_b) ? manifold->object_b->object_id : 0;
             /* MPE_TASK_05_CACHE_SAVE_STAMP_BEGIN */
@@ -1129,8 +1129,13 @@ void contact_cache_save(collision_data *manifolds, int count) {
     }
 }
 
-void contact_cache_clear(void) {
-    contact_impulse_cache_count = 0;
+void contact_cache_clear(struct physics_world *world) {
+    /* MFS_131A: NULL world = legacy global cache. */
+    if ((world) && (world->world_contact_cache)) {
+        world->world_contact_cache_count = 0;
+    } else {
+        contact_impulse_cache_count = 0;
+    }
 }
 
 /* MPE_FTC_093: Cylinder vs static floor plane.

@@ -561,7 +561,7 @@ static void mv_execute_command(void) {
         /* Config integration: reload if editing engine.cfg */
         if (strstr(mv.filename, "engine.cfg")) {
             mpe_config_load("status/engine.cfg");
-            contact_cache_clear();
+            contact_cache_clear(NULL);
         }
         mv.mode = mv_normal;
     } else if (cmd[0] == 'q' && cmd[1] == '!') {

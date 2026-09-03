@@ -132,12 +132,9 @@ static inline float broadphase_bounding_radius(rigidbody *rb) {
         return sqrtf(rb->radius * rb->radius +
                      rb->cylinder_half_length * rb->cylinder_half_length);
     }
-    return sqrtf(rb->half_extensions.x * rb->half_extensions.x + rb->half_extensions.y * rb->half_extensions.y +
+    return sqrtf(rb->half_extensions.x * rb->half_extensions.x +
+                 rb->half_extensions.y * rb->half_extensions.y +
                  rb->half_extensions.z * rb->half_extensions.z);
-    if (rb->type == object_cylinder) { /* MPE_FTC_091 */
-        return sqrtf(rb->radius * rb->radius +
-                     rb->cylinder_half_length * rb->cylinder_half_length);
-    }
 }
 
 static uint64_t a3_pair_hash_keys[a3_pair_hash_table_size];

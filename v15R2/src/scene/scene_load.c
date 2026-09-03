@@ -41,7 +41,8 @@ int scene_loading(const char *file_source_path) {
     }
     scene_clear();
     scene_id_remap_reset(); /* MPE_FTC_058 */
-    contact_cache_clear(); /* A3_PATCH_22_SCENE_LOAD_RESET */
+    contact_cache_clear(NULL); /* A3_PATCH_22_SCENE_LOAD_RESET */
+contact_cache_clear(physics_world_get_primary()); /* MFS_131 */
     joint_init_pool();
     if (count > mpe_max_bodies) {
         count = mpe_max_bodies;

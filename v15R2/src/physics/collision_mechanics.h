@@ -3,6 +3,7 @@
 #include "../core/math3D.h"
 #include "../core/rigidbody.h"
 #include "define_forces.h"
+struct physics_world; /* MFS_131: forward decl for per-world cache */
 #ifndef collisions_h
 #define collisions_h
 typedef struct {
@@ -36,8 +37,8 @@ bool collision_sphere_cube(rigidbody *sphere, rigidbody *cube, collision_data *c
 bool collision_dual_cube(rigidbody *cube_a, rigidbody *cube_b, collision_data *collision_output_data);
 void collision_prepare_solver(collision_data *source, collision_data *manifold_entry);
 void collision_resolve_iterative(collision_data *manifold_entry);
-void contact_cache_save(collision_data *manifolds, int count);
-void contact_cache_clear(void);
+void contact_cache_save(struct physics_world *world, collision_data *manifolds, int count); /* MFS_131 */
+void contact_cache_clear(struct physics_world *world); /* MFS_131 */
 
 bool collision_static_plane_sphere(rigidbody *sphere, float plane_y, collision_data *collision_output_data);
 bool collision_static_plane_cube(rigidbody *cube, float plane_y, collision_data *collision_output_data);

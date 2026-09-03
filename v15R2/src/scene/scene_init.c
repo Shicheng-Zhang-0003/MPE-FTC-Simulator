@@ -205,7 +205,7 @@ void scene_remove_object_by_index(int object_index) {
 
     uint32_t previous_selected_id = selected_object_id; /* A3_PATCH_08_SELECTION_ID */
     remove_joints_from_object(object_index);
-    contact_cache_clear();
+    contact_cache_clear(NULL);
 
     for (int i = object_index; i < object_count - 1; i++) {
         obj_per_scene[i] = obj_per_scene[i + 1];

@@ -145,7 +145,7 @@ void simulation_physics_tick(float frame_delta_time) {
                 collision_resolve_iterative(&active_manifold[m]);
             }
         }
-        contact_cache_save(active_manifold, manifold_count);
+        contact_cache_save(NULL, active_manifold, manifold_count); /* MFS_131A: legacy global fallback cache */
 
         /* Sleep restore */
         for (int sleep_restore_index = 0; sleep_restore_index < object_count; sleep_restore_index++) {

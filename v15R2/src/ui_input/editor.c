@@ -153,7 +153,7 @@ void editor_update_menus(GtkWidget *parent_window) {
             rigidbody_update_inertia_cube(selected_rigid_body);
         }
         /* MPE_TASK_06_CACHE_CLEAR_MASS */
-        contact_cache_clear();
+        contact_cache_clear(NULL);
         /* MPE_TASK_19_EDITOR_EDIT_WAKE_MASS_BEGIN */
         rigidbody_wake(selected_rigid_body);
         /* MPE_TASK_19_EDITOR_EDIT_WAKE_MASS_END */
@@ -174,7 +174,7 @@ void editor_update_menus(GtkWidget *parent_window) {
             rigidbody_update_inertia_sphere(selected_rigid_body);
         }
         /* MPE_TASK_06_CACHE_CLEAR_RADIUS */
-        contact_cache_clear();
+        contact_cache_clear(NULL);
         /* MPE_TASK_19_EDITOR_EDIT_WAKE_RADIUS_BEGIN */
         rigidbody_wake(selected_rigid_body);
         /* MPE_TASK_19_EDITOR_EDIT_WAKE_RADIUS_END */
@@ -193,7 +193,7 @@ void editor_update_menus(GtkWidget *parent_window) {
         }
         selected_rigid_body->friction_static = selected_rigid_body->friction_kinetic + 0.1f;
         /* MPE_TASK_06_CACHE_CLEAR_FRICTION */
-        contact_cache_clear();
+        contact_cache_clear(NULL);
         /* MPE_TASK_19_EDITOR_EDIT_WAKE_FRICTION_BEGIN */
         rigidbody_wake(selected_rigid_body);
         /* MPE_TASK_19_EDITOR_EDIT_WAKE_FRICTION_END */
@@ -209,7 +209,7 @@ void editor_update_menus(GtkWidget *parent_window) {
         if ((main_inputs.up_arrow_pressed) || (main_inputs.down_arrow_pressed)) {
             rigidbody_set_static(selected_rigid_body, !selected_rigid_body->static_state);
             /* MPE_TASK_06_CACHE_CLEAR_STATIC */
-            contact_cache_clear();
+            contact_cache_clear(NULL);
             main_inputs.up_arrow_pressed = false;
             main_inputs.down_arrow_pressed = false;
         }

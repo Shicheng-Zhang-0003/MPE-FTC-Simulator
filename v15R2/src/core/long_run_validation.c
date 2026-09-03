@@ -186,7 +186,7 @@ void long_run_validation_start(int duration_ticks) {
     long_run_validation_final_awake_count = 0;
 
     broadphase_reset_overflow_counts();
-    contact_cache_clear();
+    contact_cache_clear(NULL);
 
     printf("[A3] Long-run validation started: %d ticks (%.1f seconds)\n", duration_ticks,
            (float) duration_ticks / 60.0f);

@@ -32,6 +32,10 @@ void physics_world_init(physics_world *world) {
         world->bodies = (rigidbody *) malloc((size_t) mpe_max_bodies * sizeof(rigidbody));
         world->body_capacity = mpe_max_bodies;
     }
+    if (!world->world_contact_cache) {
+        world->world_contact_cache =
+            (cached_contact *) malloc((size_t) max_cached_contacts * sizeof(cached_contact)); /* MFS_131A */
+    }
     world->body_count = 0;
     if (world->next_object_id == 0) {
         world->next_object_id = 1;
@@ -46,6 +50,11 @@ void physics_world_cleanup(physics_world *world) {
         free(world->bodies);
         world->bodies = NULL;
     }
+    if (world->world_contact_cache) {
+        free(world->world_contact_cache); /* MFS_131A */
+        world->world_contact_cache = NULL;
+    }
+    world->world_contact_cache_count = 0;
     world->body_count = 0;
     world->body_capacity = 0;
 }
@@ -93,6 +102,7 @@ void physics_world_clear(physics_world *world) {
         return;
     }
     world->body_count = 0;
+    world->world_contact_cache_count = 0; /* MFS_131A */
 }
 
 void physics_world_step(physics_world *world, float dt) {
@@ -184,7 +194,7 @@ void physics_world_step(physics_world *world, float dt) {
          * impulses properly transfer through revolute constraints to the chassis */
         constraint_solve_all(world->bodies, world->body_count, dt);
     }
-    contact_cache_save(world_manifolds, manifold_count);
+    contact_cache_save(world, world_manifolds, manifold_count); /* MFS_131 */
 
     for (int i = 0; i < world->body_count; i++) {
         rb_integrate_position(&world->bodies[i], dt);
