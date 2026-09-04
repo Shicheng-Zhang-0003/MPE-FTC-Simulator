@@ -4,6 +4,8 @@
 > Current direction: FTC robotics simulator with real physics, headless testing,
 > and future FTC-style hardware abstraction.
 
+# Note. This codebase has become MPE v15R2 and is progressing as MPE in the v15R3 development slot. MFS will in the future become a kernel plugin ecosystem specifically for FTC, the FTC components CAD editor planned, as well as the Java to C cross-compiler for executing FTC native programming within the MPE runtime itself. This split will begin in v16R1.
+
 ---
 
 ## 1. What This Project Is
