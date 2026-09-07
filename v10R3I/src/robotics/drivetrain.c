@@ -259,8 +259,16 @@ wheel->driven_this_tick = true; /* MFS_169 */
     vector3 chassis_vel = world->bodies[robot->chassis_body].velocity;
     float yaw_rate = world->bodies[robot->chassis_body].angular_velocity.y;
     robot->odom_theta += yaw_rate * dt;
-    robot->odom_x += chassis_vel.x * dt;
-    robot->odom_z += chassis_vel.z * dt;
+
+    /* MFS_201_NEW04: Rotate world velocity into robot frame before integrating.
+     * Without this, odometry drifts every time the robot turns. */
+    float cos_theta = cosf(robot->odom_theta);
+    float sin_theta = sinf(robot->odom_theta);
+    float v_forward = chassis_vel.x * cos_theta + chassis_vel.z * sin_theta;
+    float v_strafe  = -chassis_vel.x * sin_theta + chassis_vel.z * cos_theta;
+
+    robot->odom_x += v_forward * dt;
+    robot->odom_z += v_strafe * dt;
 }
 
 }

@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 
-SRC_DIR = Path(__file__).resolve().parent.parent / "v15R3" / "src"
+SRC_DIR = Path(__file__).resolve().parent.parent / "v10R3I" / "src"
 
 KNOWN_TESTS = [
     "two_world",
@@ -119,6 +119,8 @@ def run_test(name: str, timeout: int = 60) -> TestResult:
         return result
 
     binary = SRC_DIR / f"test_{name}"
+    if not binary.exists():
+        binary = binary.with_suffix(".exe")
     if not binary.exists():
         result.stderr = f"Binary not found: {binary}"
         result.duration = time.monotonic() - start

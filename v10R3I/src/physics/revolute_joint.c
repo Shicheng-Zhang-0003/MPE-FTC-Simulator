@@ -138,11 +138,9 @@ void revolute_solve(revolute_params *p, rigidbody *body_a, rigidbody *body_b, fl
             math3 angular_mass_inv = math3_inverse(angular_mass);
             vector3 axis_impulse = vector3_scaling(math3_multiplication_vector3(angular_mass_inv, axis_correction), -1.0f);
             /* Apply angular impulse to both bodies */
-            if (!body_a->static_state) {
-                body_a->angular_velocity = vector3_subtraction(
-                    body_a->angular_velocity,
-                    math3_multiplication_vector3(body_a->inverse_inertia_system, axis_impulse));
-            }
+            /* MFS_201_NEW07: Only correct the wheel (body_b).
+             * The chassis (body_a) is the reference body and must not rotate
+             * to accommodate wheel tilt. */
             if (!body_b->static_state) {
                 body_b->angular_velocity = vector3_addition(
                     body_b->angular_velocity,

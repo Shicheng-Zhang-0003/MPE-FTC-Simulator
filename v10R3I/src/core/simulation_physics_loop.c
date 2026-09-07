@@ -103,7 +103,7 @@ void simulation_physics_tick(float frame_delta_time) {
                     if (a3_b_was_sleeping && (!rigid_body_a->static_state) && a3_a_is_active) {
                         rigidbody_wake(rigid_body_b);
                     }
-                    collision_prepare_solver(&narrowphase_collision, &active_manifold[manifold_count]);
+                    collision_prepare_solver(&narrowphase_collision, &active_manifold[manifold_count], fixed_physics_dt); /* MFS_205 */
                     manifold_count++;
                 } else {
                     debug_last_manifold_overflow_count++;
@@ -117,7 +117,7 @@ void simulation_physics_tick(float frame_delta_time) {
             collision_data floor_collision = {0};
             if (collision_static_plane_body(floor_rigid_body, 0.0f, &floor_collision)) {
                 if (manifold_count < a3_max_manifolds) {
-                    collision_prepare_solver(&floor_collision, &active_manifold[manifold_count]);
+                    collision_prepare_solver(&floor_collision, &active_manifold[manifold_count], fixed_physics_dt); /* MFS_205 */
                     manifold_count++;
                 } else {
                     debug_last_manifold_overflow_count++;

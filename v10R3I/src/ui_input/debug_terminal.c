@@ -2949,6 +2949,15 @@ static void cmd_seq(int argc, char **argv) {
     }
 }
 static void cmd_tee(int argc, char **argv) {
+    /* MFS_203_R315: Sandbox — block writes to source files */
+    if (argc >= 2) {
+        const char *target = argv[argc - 1];
+        if ((strstr(target, "src/")) || (strstr(target, "makefile")) ||
+            (strstr(target, ".c")) || (strstr(target, ".h"))) {
+            term_printf("term_err", "mpe: tee: cannot write to source files");
+            return;
+        }
+    }
     if (argc < 3) {
         term_err("usage: tee <filename> <command...>\n");
         return;
