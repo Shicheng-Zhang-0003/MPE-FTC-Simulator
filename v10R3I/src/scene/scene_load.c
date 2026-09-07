@@ -119,6 +119,13 @@ contact_cache_clear(physics_world_get_primary()); /* MFS_131 */
         if ((version >= 150) && (saved_object_id > 0)) {
             scene_id_remap_add((uint32_t) saved_object_id, obj_per_scene[i].object_id);
         } /* MPE_FTC_058 */
+        /* MFS_203_R304_LOAD: read cylinder_half_length */
+        {
+            float cyl_half = 0.0f;
+            if (read_float(f, &cyl_half)) {
+                obj_per_scene[i].cylinder_half_length = cyl_half;
+            }
+        }
         obj_per_scene[i].object_generation = 1;
         loaded_count++;
     }

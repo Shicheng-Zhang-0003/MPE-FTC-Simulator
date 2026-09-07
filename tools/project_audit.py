@@ -19,7 +19,7 @@ from pathlib import Path
 import re
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC = ROOT / "v15R3" / "src"
+SRC = ROOT / "v10R3I" / "src"
 if not SRC.exists():
     SRC = ROOT / "v15R2" / "src"
 
