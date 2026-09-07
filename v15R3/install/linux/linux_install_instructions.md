@@ -1,5 +1,7 @@
 # linux_install_instructions.md
 
+## Note: MFS is more oriented towards Windows than MPE is, partly because of the intended clientle. Linux compilations do still work fine however.
+
 ```
 Linux Installation Instructions:
 
