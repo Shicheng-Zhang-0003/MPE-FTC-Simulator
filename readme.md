@@ -1,149 +1,280 @@
-# MPE FTC Simulator — README
-> Status: **Milestone 2 (Physics Keystone) complete. Milestone 3 in progress.**
-> Original project: Miniature Physics Engine v15R2
-> Current direction: FTC robotics simulator with real physics, headless testing,
-> and future FTC-style hardware abstraction.
+# 🧊 MINIATURE PHYSICS ENGINE (MPE)
 
-# Note. This codebase has become MPE v15R2 and is progressing as MPE in the v15R3 development slot. MFS will in the future become a kernel plugin ecosystem specifically for FTC, the FTC components CAD editor planned, as well as the Java to C cross-compiler for executing FTC native programming within the MPE runtime itself. This split will begin in v16R1.
+<!-- MPE_RELEASE_FREEZE_NOTICE_BEGIN -->
+> **Current development tree:** `v15R2` continues the v15 configuration-system work. It is not a tagged stable release; use the release gates before promotion.
+<!-- MPE_RELEASE_FREEZE_NOTICE_END -->
+<!-- MPE_RELEASE_GATES_NOTICE_BEGIN -->
+> **Release quality:** the current criteria are in [`v15R2/RELEASE_GATES.md`](v15R2/RELEASE_GATES.md). The current candidate notes are in [`v15R2/release_notes_v15R2.md`](v15R2/release_notes_v15R2.md); [`v15R2/release_notes_v15R2.md`](v15R2/release_notes_v15R2.md) documents the prior RC.
+<!-- MPE_RELEASE_GATES_NOTICE_END -->
 
----
 
-## 1. What This Project Is
+# This is MFS, not MPE. THis retains the former MPE kernel but has been compiled specifically for building on Windows. Linux support is still available but the primary Linux platform will be MPE, which retains some MFS robotics layers.
 
-This repository is an FTC-oriented robotics simulator built on top of the
-Miniature Physics Engine (v15R2). The long-term goal is to provide an FTC
-simulation environment comparable in spirit to what WPILib simulation provides
-for FRC:
 
-- repeatable autonomous testing
-- realistic drivetrain behaviour (real cylinder wheels, anisotropic roller friction)
-- motors with BackEMF, gear ratios, battery voltage sag
-- headless tests suitable for CI
-- eventually, a user-facing robot-programming API (HardwareMap / OpMode)
+**License:** GPL-3.0 · **Language:** C · **UI:** GTK3 · **Renderer:** OpenGL 3.3 Core
 
 ---
 
-## 2. Current Test Status
+## 📋 Overview
 
-All 8 headless tests **PASS**:
+MPE is a custom-built **3D rigid-body physics engine and real-time rendering pipeline**, written entirely in **C**. It runs on a **zero-dependency core** — the only external requirements are **GTK3** (windowing/UI) and **OpenGL** (render backend).
 
-| Test | Status | What it proves |
-|---|---|---|
-| `two_world` | PASS | Separate `physics_world` instances are independent |
-| `revolute` | PASS | Revolute joint holds anchor, allows swing |
-| `teleop_drive` | PASS | Robot drives forward under motor power |
-| `mecanum_drive` | PASS | Robot strafes via **real anisotropic roller friction** |
-| `cylinder_drop` | PASS | Cylinder rests on floor (narrowphase works) |
-| `driven_wheel` | PASS | Torque → friction → translation (grounded wheel rolls) |
-| `math3_inverse` | PASS | Matrix inverse handles small inertia tensors |
-| `ftc_integration` | PASS | Full drive/turn/strafe sequence |
+MPE is built around four priorities:
+
+- **Mathematical transparency** — every integrator, solver, and collision test is hand-written and inspectable.
+- **Cache-efficient data layouts** — tightly packed structs and contiguous instance buffers.
+- **Deterministic simulation** — fixed-timestep physics decoupled from render framerate.
+- **Real-time scaling** — GPU instancing and an O(N) spatial-hash broadphase.
 
 ---
 
-## 3. Repository Layout
+## ✨ What's New in v15R2
 
-```text
-v15R2/src/
-  core/
-    physics_world.c/.h          Multi-world physics state + full pipeline
-    rigidbody.c/.h              Body data, integration, cylinder support
-    simulation_camera.c/.h      Camera tick (extracted from simulation.c)
-    simulation_physics_loop.c/.h Fixed-timestep physics loop
-    validation_report.c/.h      F9 status report
-    long_run_validation.c/.h    F10 validation
-    physics_halt.c              Halt state
-    math3D.h / math4_special.h  Linear algebra
-    event_log.c/.h              Engine event ring buffer
+`v15R2` is the active development cycle for the centralised configuration system. Highlights currently present in the tree:
 
-  physics/
-    collision_mechanics.c/.h    Narrowphase + solver + mecanum friction
-    broadphase.c/.h             Spatial hash grid
-    constraint.c/.h             Constraint pool + dispatch
-    revolute_joint.c/.h         Revolute solver + Baumgarte axis drift fix
-    spring_joint.c/.h           Legacy spring joints
-    depenetration.c/.h          Positional depenetration
-
-  robotics/
-    robot.c/.h                  FTC robot aggregate (chassis + 4 cylinder wheels)
-    drivetrain.c/.h             Tank + Mecanum IK, real traction
-    motor.c/.h                  DC motor model (BackEMF, Kt, Kv, gearing)
-    motor_presets.c/.h          5 goBILDA/REV presets
-    battery.c/.h                Voltage sag model (12.8V, 0.015Ω, 30Ah)
-    gui_robot_registry.c/.h     GUI proxy sync + fixed-timestep accumulator
-
-  ui_input/
-    simulation_input_dispatch.c  Keyboard bindings (G/V/B/N/C/H robot drive)
-    simulation_menu_dispatch.c   Scene menu handling
-    editor_dialog.c              Numerical input dialog
-    debug_terminal.c             POSIX-style terminal (146 KB)
-    microvim.c/.h                Modal text editor
-    overlay.c                    HUD overlay
-    input_control.c/.h           GTK key/mouse wiring
-    camera.c/.h                  Camera math
-    object_spawner.c/.h          Spawn logic
-    object_selector.c/.h         Raycast selection
-    mouse_lock.c/.h              X11 pointer grab
-    config_menu.c/.h             Config menu (key 6)
-
-  render/                       OpenGL instanced rendering + shaders
-  scene/                        Scene save/load, boundary, ID remap
-  config/                       69-parameter config registry
-
-  tests/
-    two_world_test.c
-    revolute_test.c
-    teleop_drive_test.c
-    mecanum_drive_test.c
-    cylinder_drop_test.c
-    driven_wheel_test.c
-    math3_inverse_test.c
-    ftc_integration_test.c
-    ftc_debug_test.c            (diagnostic, not in CI runner)
-
-tools/
-  build_check.py                Clean build + compiler diagnostics
-  test_runner.py                Headless test runner (all 8 tests)
-  refactor.py                   Safe Python refactoring helper
-  project_audit.py              Read-only architecture audit
-
-fixes/
-  Historical fix scripts (bash + python). Do not run against active code.
-```
+- **Domain-driven architecture** — clean `core`, `physics`, `render`, `scene`, `ui_input` modules.
+- **Warm-starting contact solver** with multi-point Sutherland–Hodgman manifolds for stable stacking.
+- **3D spatial-hash grid broadphase** with adaptive cell sizing.
+- **Interactive spring-joint system** with live magenta rendering.
+- **POSIX-style debug terminal** — drive the whole simulation from a shell.
+- **Built-in validation suite** (F5–F11), including a 60-second long-run stability test and config torture test.
+- **Shader/render failure visibility** — the engine no longer continues silently in a broken render state.
 
 ---
 
-## 4. Build
+## 🎨 Rendering System
 
-```bash
-cd v15R2/src
-make clean && make
-```
+### Hardware-Instanced Rendering
 
-Preferred project-level build check:
+MPE eliminates per-object draw calls using **GPU instancing**:
 
-```bash
-python3 tools/build_check.py
-```
+- The CPU packs model matrices + colors into contiguous buffers.
+- The GPU batches all dynamic bodies into **two instanced draws** (spheres, cubes).
+- The grid, selection outline, and spring-joint overlay share a utility shader with cached uniform locations.
 
----
+### Shading
 
-## 5. Test
-
-```bash
-python3 tools/test_runner.py            # all 8 tests
-python3 tools/test_runner.py --list     # show available tests
-python3 tools/test_runner.py mecanum    # filtered
-```
-
-All 8 tests pass. No expected failures.
+- Custom **GLSL Phong** lighting (ambient + diffuse + specular).
+- **Equatorial axis rings** painted on every object (red/green/blue) so rotation is visible at a glance.
 
 ---
 
-## 6. Robot Controls (GUI)
+## ⚙️ Physics Engine
 
-| Key | Action |
+### Broadphase — Spatial Hash Grid
+
+Objects are mapped into hashed grid buckets; collision checks are limited to local neighborhoods for **average O(N)** scaling. Cell size adapts to object radii. A sleep system removes inactive bodies from the solver.
+
+### Narrowphase
+
+| Pair | Method |
 |---|---|
-| `T` (terminal) → `touch robot` | Spawn FTC robot at (5, rest_height, 5) |
+| Sphere–Sphere | Analytical distance test |
+| Sphere–OBB | Closest-point projection |
+| OBB–OBB | Separating Axis Theorem (15 axes) + Sutherland–Hodgman face clipping |
+
+### Solver
+
+- **Impulse-based sequential solver**, 16 iterations, with **warm starting**.
+- Static + kinetic friction, rolling friction, Baumgarte penetration correction.
+- Positional depenetration pass for pile stability.
+
+### Integration
+
+- **Semi-implicit (symplectic) Euler** for linear motion.
+- **Quaternion-based angular integration** (no gimbal lock).
+- **Fixed 60 Hz timestep** with an accumulator and 5-substep cap (spiral-of-death prevention).
+
+---
+
+## 🧮 Mathematics Core
+
+A fully custom, dependency-free math library: 3D vectors, 4×4 matrices, quaternions, and inertia tensors — designed for tightly packed, cache-friendly structs.
+
+---
+
+## 🖥️ Platform & Rendering Stack
+
+| Layer | Technology |
+|---|---|
+| Windowing / UI | GTK3 |
+| Graphics API | OpenGL 3.3 Core (via libepoxy) |
+| Lighting | Custom GLSL Phong |
+| Debug visualization | Axis rings, wireframe selection, joint lines, overflow counters |
+
+---
+
+## 🎮 Controls
+
+### Movement & Camera
+
+| Action | Input |
+|---|---|
+| Move | `W A S D` |
+| Look around | Mouse (left-click to lock) |
+| Jump / fly up | `Space` |
+| Fly down (Debug) | `Shift` |
+| Steer camera mouse-free (Debug) | `I J K L` |
+| Release mouse | `Escape` |
+| Re-lock mouse (Debug) | `M` |
+| Toggle Game / Debug mode | `0` |
+
+### Spawning
+
+| Action | Input |
+|---|---|
+| Spawn object | Hold `Enter` |
+| Spawner settings | `8` |
+
+### Selection & Editing
+
+| Action | Input |
+|---|---|
+| Select object | Right-click (raycast) **or** `R` (Debug) |
+| Open object menu | `E` |
+| Apply impulse | `F` |
+| Delete object | Middle-click **or** `Delete` (Debug) |
+| World settings | `7` |
+| Save / Load scene | `9` |
+
+### Debug Terminal & Validation
+
+| Action | Input |
+|---|---|
+| Open debug terminal | `T` or `1` (Debug) |
+| Stability stack test | `F5` |
+| Sleep / wake test | `F6` |
+| Editor torture test | `F7` |
+| Spawn stress test (300 objects) | `F8` |
+| Validation report | `F9` |
+| Long-run validation (60 s) | `F10` |
+| **Config torture test** | **F11** |
+
+---
+
+## 🐚 Debug Terminal
+
+In Debug Mode, press `T` (or `1`) to open a **POSIX-style shell** over the physics world. The simulation is exposed as a virtual filesystem:
+
+| Path | Contents |
+|---|---|
+| `/obj` | All rigid bodies |
+| `/joint` | All spring joints |
+| `/world` | World variables (gravity, drag, friction) |
+| `/camera` | Camera state |
+| `/spawner` | Spawner settings |
+
+A few examples:
+
+```
+touch new.sph            # spawn a sphere
+ln 1 2                   # spring-join objects 1 and 2
+mv 3 /pos/0/10/0         # teleport object 3
+chown 5.0 3              # set object 3's mass to 5 kg
+chmod static 3           # make it immovable
+kill -STOP 3             # put it to sleep
+ps aux                   # list every body with state
+export GRAVITY=-2.0      # change world gravity
+```
+
+Type `help` for the full command list, `man <command>` for usage. `Ctrl+L` clears, `Esc` closes. Mutating commands require Debug Mode; in Game Mode the terminal is read-only.
+
+---
+
+## 🧪 Validation Tests
+
+MPE ships with built-in stability tests:
+
+| Key | Test |
+|---|---|
+| `F5` | 10-cube stability stack |
+| `F6` | Sleeping cube + moving projectile (sleep/wake) |
+| `F7` | Editor torture: select, joint, delete, reset |
+| `F8` | Spawn stress: up to 300 mixed objects |
+| `F9` | Print validation report |
+| `F10` | Long-run validation: 3600 ticks (60 s) of idle stability |
+
+`F10` monitors for NaN values, fallen objects, and residual motion, printing `PASS`/`FAIL` at the end.
+
+---
+
+## 🛠️ Build Instructions
+
+### Dependencies (Ubuntu / Debian)
+
+```bash
+sudo apt update
+sudo apt install build-essential pkg-config libgtk-3-dev libepoxy-dev
+```
+
+For other distributions (Fedora, Arch, SUSE, Alpine, Gentoo, Nix), see [install/linux/linux_install_instructions.md](install/linux/linux_install_instructions.md).
+
+### Build and run
+
+```bash
+cd src
+make clean
+make
+./engine
+```
+
+---
+
+## ⚠️ Known Limitations
+
+- **Wayland:** Mouse locking does not work under native Wayland. Run under X11, or try `GDK_BACKEND=x11 ./engine`.
+- **Scene format:** Save/load preserves bodies but **not** spring joints, object IDs, or sleep state. Scene format v2 is planned post-v15R2.
+- **Object count:** Performance degrades gradually above ~1136 objects; rendering is the primary bottleneck at high counts.
+- **Global state:** The engine still uses file-scope globals; full encapsulation is deferred to v15.
+
+---
+
+## 📜 Version History
+
+- **v15R2 (development)** — ongoing v15 configuration-system work. *(current tree)*
+- **v1.4 Alpha RC3** — domain-driven restructure, spatial-hash broadphase, physics-world encapsulation.
+- **v1.4 Alpha 2** — warm-starting solver, multi-point contact manifolds.
+- **v1.4 Alpha RC1** — spring joints, joint renderer, color painting, OBB raycast selection.
+- **v1.3** — established instanced rendering and spatial-hash direction.
+
+See `evolution.txt` for the full lineage back to stage 0.
+
+---
+
+### Screenshots
+
+<img width="4424" height="1824" alt="Screenshot from 2026-07-18 17-18-52" src="https://github.com/user-attachments/assets/5d1d044d-3926-469e-ab27-9f3719452324" />
+<img width="4558" height="1908" alt="Screenshot from 2026-07-18 17-20-09" src="https://github.com/user-attachments/assets/acebe348-707e-485e-835c-08cd1b1dc0fa" />
+
+<!-- MFS_FTC_SECTIONS_BEGIN -->
+
+---
+
+## 🤖 MFS — FTC Robotics Simulator
+
+This tree also carries **MFS** (MPE FTC Simulator), a robotics simulation
+layer currently merged into the engine. MFS turns MPE into an FTC-oriented
+robot simulator: a mecanum drivetrain with physically-truthful wheel contact,
+DC motor electrical models, battery voltage sag, and dead-reckoning odometry.
+
+> MFS exists to make autonomous tuning realistic. Motor commands become torque,
+> torque spins cylinder wheels, wheels grip the floor through anisotropic
+> roller friction, and sensors read back from simulated state. Nothing is
+> faked at the contact layer.
+
+### Capabilities
+- **Cylinder wheel bodies** with correct axle inertia (`I = ½·m·r²`)
+- **Mecanum drivetrain** via real anisotropic roller friction (±45° rollers) — no chassis-force cheats
+- **Tank drivetrain** via motor torque → wheel traction
+- **DC motor model** — BackEMF, gear ratio, Kt/Kv, stall/free-speed limits
+- **Battery model** — voltage sag under multi-motor load
+- **Odometry** — wheel encoders + IMU-style heading for dead reckoning
+- **Revolute joints** — wheels hinged to the chassis with axis correction
+- **Idle hold** — gearbox-style lock so a parked robot stays parked
+
+### Robot controls
+| Key | Action |
+|-----|--------|
 | `G` | Drive forward |
 | `B` | Drive backward |
 | `V` | Strafe right |
@@ -151,85 +282,57 @@ All 8 tests pass. No expected failures.
 | `C` | Rotate left (CCW) |
 | `H` | Rotate right (CW) |
 
-The robot uses goBILDA 5203 30:1 motors, mecanum drivetrain, cylinder wheels
-with real anisotropic roller friction. An orange nose sphere indicates heading.
+Spawn the robot from the debug terminal with `touch robot`.
+
+### Headless test suite
+MFS ships a headless regression suite (no GTK/OpenGL required):
+
+| Test | Proves |
+|------|--------|
+| `two_world` | Independent `physics_world` instances |
+| `revolute` | Hinge joints hold anchor and allow swing |
+| `teleop_drive` | Tank drive moves the robot |
+| `mecanum_drive` | Strafe via real roller friction |
+| `cylinder_drop` | Cylinder settles on the floor |
+| `driven_wheel` | Torque → friction → translation |
+| `math3_inverse` | Matrix inverse at small inertia tensors |
+| `ftc_integration` | Drive / turn / strafe sequence |
+| `physics_truth` | 24 physical-law assertions |
+
+Run with `python3 tools/test_runner.py`.
+
+### Physics truth gate
+`physics_truth` asserts the laws the simulator depends on: free-fall gravity,
+cylinder inertia, restitution, rolling kinematics (`v = ω·r`), rolling
+resistance, motor free-speed and stall torque, BackEMF braking, static and
+kinetic friction thresholds, numerical stability, energy conservation, and
+revolute anchor holding. This suite is the gate that keeps MFS honest.
 
 ---
 
-## 7. Development Rules
+## 🧩 Roadmap — v16 Modularisation
 
-- Use `tools/refactor.py` for scripted source edits
-- Use `tools/build_check.py` after every structural change
-- Use `tools/test_runner.py` after every physics/robotics change
-- Do not fake physics to make tests pass
-- Do not reintroduce chassis-force cheats for mecanum
+MPE and MFS are currently a single tree. The plan is to separate them cleanly.
 
----
+| Milestone | State |
+|-----------|-------|
+| **v15R2** | Config system + MFS merged *(current)* |
+| **v15S** | Stabilisation — final **merged** release |
+| **v16R1** | Begin splitting MFS out of the MPE mainframe |
+| **v16+** | MPE kernel + module ecosystem |
 
-## 8. Current Architectural State
+Beginning at **v16R1** (after **v15S**):
 
-### Resolved (since original audit)
-- `simulation.c` split from 1123 → ~130 lines (9 modules extracted)
-- Cylinder narrowphase + inertia implemented
-- Mecanum strafe via real anisotropic roller friction (no chassis cheat)
-- Motor gear ratio pipeline fixed (no double-application)
-- Revolute axis drift corrected (Baumgarte β=0.1)
-- Fixed-timestep accumulator for robot physics (60 Hz)
-- GUI robot proxy sync (physics_world → obj_per_scene)
-- All dead code removed (rb_integrate, define_forces, frame_timer.c, etc.)
+- **MPE returns to being a standalone physics-engine kernel**, but gains a
+  **kernel-module plugin state system** — a defined host into which modules
+  register their state and hooks.
+- **MFS becomes the first module ecosystem** built on that plugin system,
+  rather than code fused into the engine.
+- Within MFS, the plan is a hierarchy of **modules and submodules** — the
+  drivetrain, motor, battery, sensor, and odometry layers already present are
+  the natural candidates — each loadable against the bare MPE kernel.
 
-### Remaining debt
-- `debug_terminal.c` is 146 KB (single translation unit)
-- Global `obj_per_scene` / `object_count` still used by GUI path
-- Scene save/load doesn't persist joints, robots, or cylinders
-- No solver islanding (PHYS-001)
-- No CCD (PHYS-002)
-- No rolling resistance (PHYS-004)
-- No SIMD (PERF-001)
-- No frustum culling (PERF-003)
+**Goal:** run MPE on its own with no robotics present, and drop MFS (or any
+future ecosystem) in as a plugin.
 
----
-
-## 9. Roadmap
-
-### Phase A — Stabilize ✅
-Python tooling green. Bash scripts retired. Test status clear.
-
-### Phase B — Split simulation.c ✅
-9 modules extracted. Physics usable headlessly.
-
-### Phase C — Real Drivetrain Physics ✅
-Cylinder wheels. Anisotropic friction. Mecanum via roller contact.
-Motor model correct. Battery sag. Revolute joints with axis correction.
-
-### Phase D — Solver Hardening (in progress)
-- [ ] Per-world contact cache
-- [ ] Solver islanding
-- [ ] Rolling resistance
-- [ ] Warm-starting for constraints
-
-### Phase E — Sensors & Closed-Loop Control
-- [ ] Encoders, IMU, distance sensors
-- [ ] PID controller
-- [ ] Motor velocity/position modes
-
-### Phase F — Mechanisms
-- [ ] Prismatic joints
-- [ ] Arms, slides, servos, intakes
-
-### Phase G — FTC Platform & API
-- [ ] Robot JSON loader
-- [ ] HardwareMap abstraction
-- [ ] OpMode lifecycle
-- [ ] Gamepad model, telemetry
-
----
-
-## 10. Project Philosophy
-
-This simulator prioritises truthful physics over convenient demos.
-A robot that drives correctly here should behave the same way on a real
-FTC field. Motor commands become torque. Torque moves wheels. Wheels grip
-the floor through contact friction. Sensors read from simulated state.
-User robot code should not know whether it is running against real or
-simulated hardware.
+<!-- MFS_FTC_SECTIONS_END -->

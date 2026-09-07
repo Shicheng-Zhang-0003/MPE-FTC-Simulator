@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 
-SRC_DIR = Path(__file__).resolve().parent.parent / "v15R2" / "src"
+SRC_DIR = Path(__file__).resolve().parent.parent / "v15R3" / "src"
 
 KNOWN_TESTS = [
     "two_world",
@@ -29,6 +29,11 @@ KNOWN_TESTS = [
     "math3_inverse",
     "ftc_integration",
     "physics_truth",
+    "tank_turn",
+    "odometry_accuracy",
+    "cylinder_sphere",
+    "cylinder_cube",
+    "cylinder_cylinder",
 ]
 
 # Tests that encode desired future behavior but are currently expected
