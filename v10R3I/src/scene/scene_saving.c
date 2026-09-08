@@ -16,8 +16,11 @@ static void write_vec4(FILE *f, vector4 v) {
     fwrite(&v, sizeof(vector4), 1, f);
 }
 int save_scene(const char *file_destination_path) {
-    FILE *f = fopen(file_destination_path, "wb");
-    if (!f) {
+    /* R3-03: Atomic write — write to temp file, rename on success */
+    char tmp_path[512];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", file_destination_path);
+    FILE *f = fopen(tmp_path, "wb");
+	if (!f) {
         fprintf(stderr, "Error SVF01: Could not open %s\n", file_destination_path);
         return 0;
     }
@@ -57,7 +60,13 @@ int save_scene(const char *file_destination_path) {
             write_float(f, joint_pool[j].spring_constant);
             write_float(f, joint_pool[j].damping_coefficient);
         }
-    }
-    fclose(f);
-    return 1;
+    } fflush(f);
+    fclose(f);    /* R3-03: Atomic rename — old file survives if this fails */
+	/* MFS_208: Windows needs target removed first */
+    remove(file_destination_path);
+    if (rename(tmp_path, file_destination_path) != 0) {
+        fprintf(stderr, "Error SVF02: Could not rename %s to %s\n",
+                tmp_path, file_destination_path);
+        return 0;
+    } return 1;
 }

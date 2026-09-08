@@ -218,7 +218,12 @@ bool mpe_config_save(const char *path) {
         return false;
     }
     ensure_parent_dir(path);
-    FILE *file = fopen(path, "w");
+
+    /* MFS_203_ATOMIC_WRITE: write to temp file, then rename */
+    char tmp_path[512];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", path);
+
+    FILE *file = fopen(tmp_path, "w");
     if (!file) {
         return false;
     }
@@ -227,7 +232,7 @@ bool mpe_config_save(const char *path) {
     char stamp[64];
     strftime(stamp, sizeof(stamp), "%Y-%m-%d %H:%M:%S", local_time);
     fprintf(file, "# MPE Engine Configuration\n");
-    fprintf(file, "# saved:   %s\n\n", stamp);
+    fprintf(file, "# saved:   %s\n", stamp);
     for (int cat = 0; cat <= cat_ui; cat++) {
         bool wrote_header = false;
         for (size_t i = 0; i < g_registry_count; i++) {
@@ -251,6 +256,16 @@ bool mpe_config_save(const char *path) {
         }
     }
     fclose(file);
+
+    /* Atomic rename */
+    /* MFS_208_ATOMIC_WRITE_WINDOWS: Windows rename() fails if target exists.
+     * Must remove() target first. On POSIX this is a no-op (rename replaces). */
+    remove(path);
+    if (rename(tmp_path, path) != 0) {
+        fprintf(stderr, "[config] Error: could not rename %s to %s\n", tmp_path, path);
+        return false;
+    }
+
     return true;
 }
 
