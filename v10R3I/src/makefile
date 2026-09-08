@@ -9,7 +9,7 @@ ifeq ($(OS),Windows_NT)
 LIBS = $(shell pkg-config --libs gtk+-3.0 epoxy) -lm -lxinput9_1_0
 else
 LIBS = $(shell pkg-config --libs gtk+-3.0 epoxy) -lm
-endif -lxinput9_1_0
+endif
 
 BUILD_DIR := build
 SOURCES := $(shell find . -name '*.c' | sed 's|^\./||')

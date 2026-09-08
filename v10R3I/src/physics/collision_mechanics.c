@@ -767,7 +767,7 @@ static bool a3_task05_cached_impulses_are_usable(float normal_impulse, float tan
 }
 /* MPE_TASK_05_CACHE_VALIDATE_END */
 
-void collision_prepare_solver(collision_data *source, collision_data *m) {
+void collision_prepare_solver(collision_data *source, collision_data *m, float dt) { /* MFS_205 */
     *m = *source;
     static int a3_patch_19_cache_reset_done = 0; /* A3_PATCH_19_CACHE_RESET */
     if (!a3_patch_19_cache_reset_done) {
@@ -787,7 +787,7 @@ void collision_prepare_solver(collision_data *source, collision_data *m) {
         cp->accumulated_tangent_impulse = 0.0f;
         const float penetration_slop = g_cfg.solver.penetration_slop; /* MPE_TASK_30 */
         const float bias_factor = g_cfg.solver.bias_factor; /* MPE_TASK_30 */
-        cp->separation_bias = bias_factor * fmaxf(cp->penetration - penetration_slop, 0.0f) * 60.0f;
+        cp->separation_bias = bias_factor * fmaxf(cp->penetration - penetration_slop, 0.0f) / dt; /* MFS_202_R314 */
         if (cp->separation_bias > g_cfg.solver.max_separation_bias) {
             cp->separation_bias = g_cfg.solver.max_separation_bias;
         }
@@ -893,7 +893,10 @@ void collision_prepare_solver(collision_data *source, collision_data *m) {
             mecanum_wheel = m->object_b;
         }
         
-        if (mecanum_wheel && mecanum_wheel->type == object_cylinder) {
+        /* MFS_201_NEW08: Only apply mecanum tangent for floor contacts.
+     * If the contact normal isn't mostly vertical, fall through to standard tangent. */
+    bool mfs_is_floor_contact = (fabsf(m->normal_vector.y) > 0.9f);
+    if (mecanum_wheel && mecanum_wheel->type == object_cylinder && mfs_is_floor_contact) {
             /* Compute roller's free-slide direction in world space.
              * Roller angle is measured from the axle (local X axis).
              * For a wheel resting on the floor (y=0 plane), the roller direction
@@ -1170,7 +1173,25 @@ bool collision_static_plane_cylinder(rigidbody *cyl, float plane_y, collision_da
         cp->penetration = pen2;
         collision_output_data->contact_count++;
     }
-    return collision_output_data->contact_count > 0;
+    
+    /* MFS_201_NEW01: Barrel-surface contact for tipped cylinders.
+     * When axle is horizontal, axle endpoints don't touch floor.
+     * Test the barrel surface against the floor plane. */
+    {
+        vector3 axis = cyl->cached_axes[0];
+        float axle_y_component = fabsf(axis.y);
+        if (axle_y_component < 0.7f) {
+            float barrel_pen = plane_y - (cyl->position.y - r);
+            if ((barrel_pen > 0.0f) && (collision_output_data->contact_count < 2)) {
+                contact_point_data *cp = &collision_output_data->contacts[collision_output_data->contact_count];
+                cp->position = (vector3){cyl->position.x, plane_y, cyl->position.z};
+                cp->penetration = barrel_pen;
+                collision_output_data->contact_count++;
+            }
+        }
+    }
+
+return collision_output_data->contact_count > 0;
 }
 
 /* ================================================================
