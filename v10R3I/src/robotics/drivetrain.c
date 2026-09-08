@@ -132,9 +132,10 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
             if (m > 0.0f) {
                 vector3 v = chassis->velocity;
                 vector3 lat = {v.x, 0.0f, v.z};
-                chassis->force_accumulator = vector3_subtraction(
-                    chassis->force_accumulator,
-                    vector3_scaling(lat, m * 1.0f) /* MFS_132_DAMPING_TRUTH: PHYSICS LIE — artificial lateral damping. Real lateral resistance comes from wheel-floor friction. Reduce further once contact solver is stable enough. */ /* MFS_122: reduced from 3.0 */);
+                // MFS 201 NEW-05, Removing artificial lateral dampening and replacing with proper wheel-floor friction
+                // chassis->force_accumulator = vector3_subtraction(
+                    // chassis->force_accumulator,
+                    // vector3_scaling(lat, m * 1.0f) /* MFS_132_DAMPING_TRUTH: PHYSICS LIE — artificial lateral damping. Real lateral resistance comes from wheel-floor friction. Reduce further once contact solver is stable enough. */ /* MFS_122: reduced from 3.0 */);
                 float yaw_vel = chassis->angular_velocity.y;
                 chassis->torque_accumulator.y -= yaw_vel * m * 1.5f * 0.02f /* MFS_127: increased from 1.0 to stop residual rotation */ /* MFS_124: balanced yaw damping */;
                 /* MFS_146_IDLE_HOLD: an unpowered real robot's drivetrain (gearbox
