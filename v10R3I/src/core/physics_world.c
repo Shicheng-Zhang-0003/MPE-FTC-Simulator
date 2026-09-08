@@ -28,6 +28,32 @@ void physics_world_init(physics_world *world) {
         return;
     }
     memset(world, 0, sizeof(physics_world)); /* MPE_FTC_076a */
+
+    /* MFS_202_R307: FTC field containment walls (12ft x 12ft).
+     * Prevents bodies from escaping to infinity and producing NaN. */
+    {
+        float half_w = 1.8288f;   /* 6 ft */
+        float wall_h = 0.3048f;   /* 12 in */
+        float wall_t = 0.0254f;   /* 1 in */
+
+        /* North wall */
+        physics_world_add_cube(world,
+            (vector3){0.0f, wall_h * 0.5f, half_w},
+            (vector3){half_w, wall_h * 0.5f, wall_t * 0.5f}, 0.0f);
+        /* South wall */
+        physics_world_add_cube(world,
+            (vector3){0.0f, wall_h * 0.5f, -half_w},
+            (vector3){half_w, wall_h * 0.5f, wall_t * 0.5f}, 0.0f);
+        /* East wall */
+        physics_world_add_cube(world,
+            (vector3){half_w, wall_h * 0.5f, 0.0f},
+            (vector3){wall_t * 0.5f, wall_h * 0.5f, half_w}, 0.0f);
+        /* West wall */
+        physics_world_add_cube(world,
+            (vector3){-half_w, wall_h * 0.5f, 0.0f},
+            (vector3){wall_t * 0.5f, wall_h * 0.5f, half_w}, 0.0f);
+    }
+
     if (!world->bodies) {
         world->bodies = (rigidbody *) malloc((size_t) mpe_max_bodies * sizeof(rigidbody));
         world->body_capacity = mpe_max_bodies;
@@ -172,7 +198,25 @@ void physics_world_step(physics_world *world, float dt) {
             collided = collision_cylinder_cylinder(body_a, body_b, &narrowphase_collision);
         }
         if ((collided) && (manifold_count >= 0) && (manifold_count < a3_max_manifolds)) { /* MPE_FTC_078 */
-            collision_prepare_solver(&narrowphase_collision, &world_manifolds[manifold_count]);
+            collision_prepare_solver(&narrowphase_collision, &world_manifolds[manifold_count], dt); /* MFS_205 */
+            /* MFS_202_R306: Wake sleeping bodies on contact with active bodies. */
+            {
+                rigidbody *wake_a = &world->bodies[index_a];
+                rigidbody *wake_b = &world->bodies[index_b];
+                if ((wake_a->is_sleeping) && (!wake_b->is_sleeping) && (!wake_b->static_state)) {
+                    float speed_sq = vector3_length_squared(wake_b->velocity);
+                    if (speed_sq > g_cfg.sleep.wake_linear_thresh_sq) {
+                        rigidbody_wake(wake_a);
+                    }
+                }
+                if ((wake_b->is_sleeping) && (!wake_a->is_sleeping) && (!wake_a->static_state)) {
+                    float speed_sq = vector3_length_squared(wake_a->velocity);
+                    if (speed_sq > g_cfg.sleep.wake_linear_thresh_sq) {
+                        rigidbody_wake(wake_b);
+                    }
+                }
+            }
+
             manifold_count++;
         }
     }
@@ -184,7 +228,7 @@ void physics_world_step(physics_world *world, float dt) {
         }
         collision_data floor_collision = {0};
         if ((collision_static_plane_body(rb, 0.0f, &floor_collision)) && (manifold_count < a3_max_manifolds)) {
-            collision_prepare_solver(&floor_collision, &world_manifolds[manifold_count]);
+            collision_prepare_solver(&floor_collision, &world_manifolds[manifold_count], dt); /* MFS_205 */
             manifold_count++;
         }
     }

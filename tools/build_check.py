@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Optional
 
 
-SRC_DIR = Path(__file__).resolve().parent.parent / "v15R3" / "src"
+SRC_DIR = Path(__file__).resolve().parent.parent / "v10R3I" / "src"
 
 
 class BuildResult:
@@ -159,6 +159,8 @@ if __name__ == "__main__":
 
     if test_name:
         test_binary = SRC_DIR / f"test_{test_name}"
+    if not test_binary.exists():
+        test_binary = SRC_DIR / f"test_{test_name}.exe"  # MFS_207
         if test_binary.exists():
             print(f"\nRunning test_{test_name}...")
             proc = subprocess.run(

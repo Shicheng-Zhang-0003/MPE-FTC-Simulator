@@ -22,6 +22,11 @@ void scene_allocate_pool(void) {
 static uint32_t next_object_id = 1;
 
 uint32_t scene_allocate_object_id(void) {
+    /* MFS_203_R312: Check for wrap-around collision */
+    if (next_object_id == 0) {
+        next_object_id = 1;  /* Skip 0, it's the sentinel */
+        fprintf(stderr, "[WARN] object ID wrapped, resetting to 1\n");
+    }
     return next_object_id++;
 }
 
