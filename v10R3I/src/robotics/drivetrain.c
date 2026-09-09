@@ -131,7 +131,6 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
             float m = chassis->mass;
             if (m > 0.0f) {
                 vector3 v = chassis->velocity;
-                vector3 lat = {v.x, 0.0f, v.z};
                 // MFS 201 NEW-05, Removing artificial lateral dampening and replacing with proper wheel-floor friction
                 // chassis->force_accumulator = vector3_subtraction(
                     // chassis->force_accumulator,
