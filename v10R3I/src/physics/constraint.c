@@ -5,8 +5,10 @@
 
 static constraint constraint_pool [mpe_max_joints];
 static int constraint_count = 0;
+static uint32_t constraint_world_generation = 0; /* MFS_301 */
 
 void constraint_pool_init (void) {
+    constraint_world_generation++; /* MFS_301: new generation on every pool reset */
     for (int i = 0; i < mpe_max_joints; i++) { constraint_pool [i].is_active = false; }
     constraint_count = 0;
 }
@@ -26,6 +28,7 @@ int constraint_add_revolute (uint32_t id_a, uint32_t id_b, vector3 anchor_a, vec
             constraint_pool [i].p.revolute.motor_target_speed = 0.0f;
             constraint_pool [i].p.revolute.motor_max_torque = 0.0f;
             constraint_pool [i].is_active = true;
+constraint_pool [i].world_generation = constraint_world_generation; /* MFS_301B */
             constraint_count++;
             return i;
         }
@@ -63,6 +66,7 @@ static void constraint_dispatch (rigidbody *bodies, int body_count, float dt, bo
     if ((!bodies) || (body_count <= 0)) { return; }
     for (int i = 0; i < mpe_max_joints; i++) {
         if (!constraint_pool [i].is_active) { continue; }
+        if (constraint_pool [i].world_generation != constraint_world_generation) { continue; } /* MFS_301 */
         constraint *c = &constraint_pool [i];
         rigidbody *body_a = find_body_by_id (bodies, body_count, c->body_id_a);
         rigidbody *body_b = find_body_by_id (bodies, body_count, c->body_id_b);
