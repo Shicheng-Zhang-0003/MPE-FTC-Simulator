@@ -38,10 +38,44 @@ void gamepad_close(gamepad_state *pad) {
 }
 
 void gamepad_poll(gamepad_state *pad) {
-    if (!pad || !pad->connected || pad->fd < 0) return;
+    if (!pad) return;
+
+    /* MFS_323: Periodic reconnect attempt when disconnected.
+     * Try to reopen the device every 60 frames (~1 second). */
+    if (!pad->connected || pad->fd < 0) {
+        static int reconnect_counter = 0;
+        if (++reconnect_counter >= 60) {
+            reconnect_counter = 0;
+#ifdef _WIN32
+            XINPUT_STATE probe_st;
+            if (XInputGetState(0, &probe_st) == ERROR_SUCCESS) {
+                pad->connected = true;
+                pad->fd = 0;
+                memset(pad->axes, 0, sizeof(pad->axes));
+                memset(pad->buttons, 0, sizeof(pad->buttons));
+                printf("[gamepad] XInput device 0 reconnected\n");
+            }
+#else
+            int probe_fd = open("/dev/input/js0", O_RDONLY | O_NONBLOCK);
+            if (probe_fd >= 0) {
+                pad->connected = true;
+                pad->fd = probe_fd;
+                memset(pad->axes, 0, sizeof(pad->axes));
+                memset(pad->buttons, 0, sizeof(pad->buttons));
+                printf("[gamepad] device reconnected\n");
+            }
+#endif
+        }
+        return;
+    }
     XINPUT_STATE st;
     if (XInputGetState((DWORD)pad->fd, &st) != ERROR_SUCCESS) {
         pad->connected = false;
+        /* MFS_322: Zero all input state on disconnect.
+         * Prevents stale axis/button values from being used
+         * if a future code path doesn't check connected. */
+        memset(pad->axes, 0, sizeof(pad->axes));
+        memset(pad->buttons, 0, sizeof(pad->buttons));
         return;
     }
     pad->axes[gamepad_axis_left_x]        = (float)st.Gamepad.sThumbLX / 32768.0f;

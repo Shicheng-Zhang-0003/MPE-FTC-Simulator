@@ -72,6 +72,17 @@ int scene_loading(const char *file_source_path) {
         sb->cylinder_half_length = 0.0f;
 
         if (!read_int(f, &sb->type_int)) break;
+        /* MFS_310: Reject unknown object types instead of silently
+         * converting them to spheres. Corrupted scene data should
+         * fail the load, not produce garbage objects. */
+        if ((sb->type_int != object_sphere) &&
+            (sb->type_int != object_cube) &&
+            (sb->type_int != object_cylinder)) {
+            fprintf(stderr, "Error LDF05: Unknown object type %d at body %d. Load aborted.\n",
+                    sb->type_int, i);
+            fclose(f);
+            return 0;
+        }
         if (!read_float(f, &sb->mass)) break;
         if (!read_float(f, &sb->radius)) break;
         if (!read_vec3(f, &sb->half_extensions)) break;
