@@ -30,6 +30,10 @@ return 1;
 }
 memset(robot, 0, sizeof(ftc_robot));
 /* memset zeroes odom_x/z/theta and wheel_radians — no separate init needed */
+/* MFS_302C_CAPACITY: Pre-check capacity before creating anything. */
+if (world->body_count + 5 > world->body_capacity) {
+return 1;
+}
     robot->motor_preset = preset;
     robot->drivetrain_type = drivetrain_type;
     robot->axle_axis_x = 1.0f; /* axles point along X (left-right) */
@@ -61,7 +65,17 @@ memset(robot, 0, sizeof(ftc_robot));
             physics_world_add_cylinder(world, WHEEL_RADIUS, WHEEL_HALF_WIDTH, WHEEL_MASS,
                                      (vector3){wheel_positions[i][0], wheel_positions[i][1], wheel_positions[i][2]});
         if (robot->wheel_bodies[i] < 0) {
-            return 1;
+/* MFS_302C_ROLLBACK: Mark already-created bodies as dead. */
+if (robot->chassis_body >= 0)
+rigidbody_set_static(&world->bodies[robot->chassis_body], true);
+for (int rb_i = 0; rb_i < i; rb_i++) {
+if (robot->wheel_bodies[rb_i] >= 0)
+rigidbody_set_static(&world->bodies[robot->wheel_bodies[rb_i]], true);
+if (robot->wheel_joints[rb_i] >= 0)
+constraint_remove(robot->wheel_joints[rb_i]);
+}
+memset(robot, 0, sizeof(ftc_robot));
+return 1;
         }
 
         uint32_t wheel_id = world->bodies[robot->wheel_bodies[i]].object_id;
@@ -74,7 +88,17 @@ memset(robot, 0, sizeof(ftc_robot));
         robot->wheel_joints[i] =
             constraint_add_revolute(chassis_id, wheel_id, anchor_on_chassis, anchor_on_wheel, axle_axis);
         if (robot->wheel_joints[i] < 0) {
-            return 1;
+/* MFS_302C_ROLLBACK: Mark already-created bodies as dead. */
+if (robot->chassis_body >= 0)
+rigidbody_set_static(&world->bodies[robot->chassis_body], true);
+for (int rb_i = 0; rb_i <= i; rb_i++) {
+if (robot->wheel_bodies[rb_i] >= 0)
+rigidbody_set_static(&world->bodies[robot->wheel_bodies[rb_i]], true);
+if (robot->wheel_joints[rb_i] >= 0)
+constraint_remove(robot->wheel_joints[rb_i]);
+}
+memset(robot, 0, sizeof(ftc_robot));
+return 1;
         }
 
         /* MFS_MECANUM_REAL: Mark wheel as mecanum with roller angle.
