@@ -101,7 +101,13 @@ input_state -> enter_spawn_held = false;
 if ((event -> keyval == GDK_KEY_r) || (event -> keyval == GDK_KEY_R)) {input_state -> r_key_pressed = true;}
 if (event -> keyval == GDK_KEY_Delete) {input_state -> delete_key_pressed = true;}
 if ((event -> keyval == GDK_KEY_m) || (event -> keyval == GDK_KEY_M)) {input_state -> m_key_pressed = true;}
-if ((event -> keyval == GDK_KEY_t) || (event -> keyval == GDK_KEY_T)) {input_state -> t_key_pressed = true;}
+    if ((event -> keyval == GDK_KEY_t) || (event -> keyval == GDK_KEY_T)) {
+        input_state -> t_key_pressed = true;
+        /* MFS_321: T opens the debug terminal */
+        if (input_state -> is_debug_mode_active) {
+            input_state -> debug_terminal_pressed = true;
+        }
+    }
 /* MPE_TASK_21_KEYBOARD_ONLY_KEYPRESS_END */
 if (event -> keyval == GDK_KEY_F5) {input_state -> stability_test_pressed = true;}
 if (event -> keyval == GDK_KEY_F6) {input_state -> sleep_wake_test_pressed = true;}
@@ -242,6 +248,7 @@ if (event -> keyval == GDK_KEY_space) {input_state -> space_key_pressed = true;}
     if (event -> keyval == GDK_KEY_a) {input_state -> a_key_pressed = false;}
     if (event -> keyval == GDK_KEY_s) {input_state -> s_key_pressed = false;}
     if (event -> keyval == GDK_KEY_d) {input_state -> d_key_pressed = false;}
+    if (event -> keyval == GDK_KEY_e) {input_state -> e_key_pressed = false;} /* MFS_320 */
 /* MPE_TASK_21_KEYBOARD_ONLY_KEYRELEASE_BEGIN */
 if ((event -> keyval == GDK_KEY_r) || (event -> keyval == GDK_KEY_R)) {input_state -> r_key_pressed = false;}
 if (event -> keyval == GDK_KEY_Delete) {input_state -> delete_key_pressed = false;}

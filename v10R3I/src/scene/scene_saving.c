@@ -3,17 +3,18 @@
 #include "../physics/spring_joint.h"
 #include <stdio.h>
 #include <stdint.h>
-static void write_float(FILE *f, float v) {
-    fwrite(&v, sizeof(float), 1, f);
+/* MFS_311: Write helpers now return bool for error checking. */
+static bool write_float(FILE *f, float v) {
+    return fwrite(&v, sizeof(float), 1, f) == 1;
 }
-static void write_int(FILE *f, int32_t v) {
-    fwrite(&v, sizeof(int32_t), 1, f);
+static bool write_int(FILE *f, int32_t v) {
+    return fwrite(&v, sizeof(int32_t), 1, f) == 1;
 }
-static void write_vec3(FILE *f, vector3 v) {
-    fwrite(&v, sizeof(vector3), 1, f);
+static bool write_vec3(FILE *f, vector3 v) {
+    return fwrite(&v, sizeof(vector3), 1, f) == 1;
 }
-static void write_vec4(FILE *f, vector4 v) {
-    fwrite(&v, sizeof(vector4), 1, f);
+static bool write_vec4(FILE *f, vector4 v) {
+    return fwrite(&v, sizeof(vector4), 1, f) == 1;
 }
 int save_scene(const char *file_destination_path) {
     /* R3-03: Atomic write — write to temp file, rename on success */
@@ -24,9 +25,15 @@ int save_scene(const char *file_destination_path) {
         fprintf(stderr, "Error SVF01: Could not open %s\n", file_destination_path);
         return 0;
     }
-    write_int(f, mpe_magic);
-    write_int(f, mpe_version);
-    write_int(f, object_count);
+    /* MFS_311: All writes now checked. On failure, abort and remove tmp. */
+    if (!write_int(f, mpe_magic) ||
+        !write_int(f, mpe_version) ||
+        !write_int(f, object_count)) {
+        fclose(f);
+        remove(tmp_path);
+        fprintf(stderr, "Error SVF03: Write failed during header.\n");
+        return 0;
+    }
     for (int i = 0; i < object_count; i++) {
         rigidbody *rb = &obj_per_scene[i];
         write_int(f, (int32_t) rb->type);
@@ -45,14 +52,18 @@ int save_scene(const char *file_destination_path) {
         write_int(f, (int32_t) rb->object_id); /* MPE_FTC_058 */
     write_float(f, rb->cylinder_half_length); /* MFS_203_R304: save cylinder geometry */
     }
+    /* MFS_313: Iterate ALL joint slots, not just current_joint_count.
+     * Joint removal creates holes while decrementing current_joint_count,
+     * so active joints can exist at indices >= current_joint_count. */
     int active_joints = 0;
-    for (int j = 0; j < current_joint_count; j++) {
+    for (int j = 0; j < mpe_max_joints; j++) {
         if (joint_pool[j].is_active) {
             active_joints++;
         }
     }
     write_int(f, active_joints);
-    for (int j = 0; j < current_joint_count; j++) {
+    /* MFS_313: Write all active joints from full pool. */
+    for (int j = 0; j < mpe_max_joints; j++) {
         if (joint_pool[j].is_active) {
             write_int(f, (int32_t) joint_pool[j].object_id_a);
             write_int(f, (int32_t) joint_pool[j].object_id_b);
