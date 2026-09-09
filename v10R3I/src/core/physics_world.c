@@ -27,8 +27,30 @@ void physics_world_init(physics_world *world) {
     if (!world) {
         return;
     }
-    memset(world, 0, sizeof(physics_world)); /* MPE_FTC_076a */
+    /* MFS_300_LIFECYCLE: Free old allocations before memset to prevent leaks. */
+    if (world->bodies) {
+        free(world->bodies);
+        world->bodies = NULL;
+    }
+    if (world->world_contact_cache) {
+        free(world->world_contact_cache);
+        world->world_contact_cache = NULL;
+    }
+    memset(world, 0, sizeof(physics_world));
 
+    if (!world->bodies) {
+        world->bodies = (rigidbody *) malloc((size_t) mpe_max_bodies * sizeof(rigidbody));
+        world->body_capacity = mpe_max_bodies;
+    }
+    if (!world->world_contact_cache) {
+        world->world_contact_cache =
+            (cached_contact *) malloc((size_t) max_cached_contacts * sizeof(cached_contact)); /* MFS_131A */
+    }
+    world->body_count = 0;
+    if (world->next_object_id == 0) {
+        world->next_object_id = 1;
+    }
+    /* MFS_300B: Walls moved AFTER allocation so add_cube works. */
     /* MFS_202_R307: FTC field containment walls (12ft x 12ft).
      * Prevents bodies from escaping to infinity and producing NaN. */
     {
@@ -54,18 +76,8 @@ void physics_world_init(physics_world *world) {
             (vector3){wall_t * 0.5f, wall_h * 0.5f, half_w}, 0.0f);
     }
 
-    if (!world->bodies) {
-        world->bodies = (rigidbody *) malloc((size_t) mpe_max_bodies * sizeof(rigidbody));
-        world->body_capacity = mpe_max_bodies;
-    }
-    if (!world->world_contact_cache) {
-        world->world_contact_cache =
-            (cached_contact *) malloc((size_t) max_cached_contacts * sizeof(cached_contact)); /* MFS_131A */
-    }
-    world->body_count = 0;
-    if (world->next_object_id == 0) {
-        world->next_object_id = 1;
-    }
+
+
 }
 
 void physics_world_cleanup(physics_world *world) {

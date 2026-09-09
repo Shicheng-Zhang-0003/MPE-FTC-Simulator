@@ -30,6 +30,7 @@ typedef struct {
     uint32_t body_id_a;
     uint32_t body_id_b;
     bool is_active;
+    uint32_t world_generation; /* MFS_301: generation tag for world ownership */
     union {
         revolute_params revolute;
     } p;
