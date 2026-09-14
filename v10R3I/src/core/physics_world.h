@@ -31,6 +31,11 @@ typedef struct physics_world {
      * NULL-world callers fall back to the global cache. */
     cached_contact *world_contact_cache;
     int world_contact_cache_count;
+    /* MFS_310B_WORLD_MAGIC: poison marker set by physics_world_init. Lets init/cleanup
+     * know a world was actually initialized by us before free()-ing its buffers.
+     * Stack-declared worlds previously held garbage pointers and physics_world_init
+     * could free() a garbage address -> SEGV in every test binary. */
+    uint32_t magic;
 } physics_world;
 
 void physics_world_init(physics_world *world);

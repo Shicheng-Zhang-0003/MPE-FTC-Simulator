@@ -1,5 +1,6 @@
 #include "../mpe_engine.h"
 #include "rigidbody.h"
+#include <string.h> /* MFS_310_RIGIDBODY_INIT: memset for deterministic body state */
 // Helper to update axes from orientation
 static bool a3_vector3_is_finite(vector3 v) {
     return isfinite(v.x) && isfinite(v.y) && isfinite(v.z);
@@ -178,6 +179,8 @@ void rigidbody_update_axes(rigidbody *rigid_body) {
     /* MPE_TASK_15_AXIS_STAMP_END */
 } //Init
 void rigidbody_initialisation_sphere(rigidbody *rigid_body, float radius, float mass, vector3 position_input) {
+    /* MFS_310_RIGIDBODY_INIT: see cube init. */
+    memset(rigid_body, 0, sizeof(rigidbody));
     //Kinematic
     rigid_body->position = position_input;
     rigid_body->velocity = vector3_zero();
@@ -413,6 +416,10 @@ vector3 make_half_extents(float width, float height, float depth) {
 }
 // Initialize a cube: Box, OBB
 void rigidbody_initialisation_cube(rigidbody *rigid_body, vector3 position_input, vector3 half_extensions, float mass) {
+    /* MFS_310_RIGIDBODY_INIT: bodies come from a malloc'd pool. Without memset
+     * the bools (is_mecanum, driven_this_tick) and roller_angle_rad are garbage,
+     * which previously corrupted the mecanum-wheellock paths. Zero everything. */
+    memset(rigid_body, 0, sizeof(rigidbody));
     //Kinematic
     rigid_body->position = position_input;
     rigid_body->velocity = vector3_zero();
@@ -530,6 +537,8 @@ void rigidbody_update_inertia_cylinder(rigidbody *rigid_body) {
 }
 
 void rigidbody_initialisation_cylinder(rigidbody *rigid_body, float radius, float half_length, float mass, vector3 position_input) {
+    /* MFS_310_RIGIDBODY_INIT: see cube init. */
+    memset(rigid_body, 0, sizeof(rigidbody));
     rigid_body->position = position_input;
     rigid_body->velocity = vector3_zero();
     rigid_body->acceleration = vector3_zero();

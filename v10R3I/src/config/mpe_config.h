@@ -75,6 +75,7 @@ float rolling_resistance_coeff; /* MFS_132 */
         float static_friction_thresh;
         float warm_start_match_dist_sq;
         float wheel_lock_omega_thresh; /* MFS_166 */
+        float roller_friction_coeff; /* MFS_310_ANISO: mecanum roller free-axis friction (near 0) */
     } solver;
 
     struct {

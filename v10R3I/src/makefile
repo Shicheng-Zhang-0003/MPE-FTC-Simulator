@@ -214,3 +214,18 @@ config/mpe_config.c config/mpe_config_schema.c
 test_cylinder_cylinder: $(CYL_CYL_SOURCES)
 	$(CC) $(CFLAGS) -DMFS_CYL_CYL_TEST $(CYL_CYL_SOURCES) -lm -o test_cylinder_cylinder
 	./test_cylinder_cylinder
+
+# MFS_313/314: full-driveline stress test ("buttery controller" harness)
+DRIVE_STRESS_SOURCES := tests/drive_stress_test.c core/physics_world.c core/rigidbody.c \
+physics/collision_mechanics.c physics/broadphase.c physics/constraint.c physics/revolute_joint.c \
+robotics/motor.c robotics/motor_presets.c robotics/battery.c robotics/robot.c robotics/drivetrain.c \
+config/mpe_config.c config/mpe_config_schema.c
+test_drive_stress: $(DRIVE_STRESS_SOURCES)
+	$(CC) $(CFLAGS) -DMFS_DRIVE_STRESS_TEST $(DRIVE_STRESS_SOURCES) -lm -o test_drive_stress
+	./test_drive_stress
+
+test_drive_stress_asan: $(DRIVE_STRESS_SOURCES)
+	$(CC) $(CFLAGS) -O1 -g -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer \
+	  -DMFS_DRIVE_STRESS_TEST $(DRIVE_STRESS_SOURCES) -lm \
+	  -fsanitize=address -fsanitize=undefined -o test_drive_stress_asan
+	./test_drive_stress_asan

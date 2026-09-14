@@ -17,6 +17,15 @@ typedef struct {
     float effective_mass_tangent;
     vector3 tangent_vector;
     vector3 cached_tangent;
+    /* MFS_310_ANISO: second friction axis for mecanum floor contacts.
+     * tangent_vector = grip axis (full mu); free_tangent_vector = roller
+     * free axis (mu ~ 0). Non-mecanum contacts leave free_tangent_vector
+     * zero and only the grip axis is resolved (identical to old behaviour). */
+    vector3 free_tangent_vector;
+    float friction_grip_coeff;
+    float friction_free_coeff;
+    float effective_mass_free_tangent;
+    float accumulated_free_tangent_impulse;
     float restitution_bias;
     float separation_bias;
     vector3 ra;
