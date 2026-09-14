@@ -116,13 +116,37 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
             vector3 axle = vector4_rotate_to_vector3(wheel->orientation, (vector3){1.0f, 0.0f, 0.0f});
             vector3 rolling_dir = vector3_normalisation(vector3_cross(axle, world_up));
 
+            /* MFS_MECANUM_STRAFE_FIX: For mecanum wheels, motor torque produces
+             * force along the roller's grip direction (perpendicular to the roller's
+             * free-slide direction), not just forward. The roller angle rotates the
+             * force direction from the forward axis by the roller angle. This is what
+             * creates the lateral strafe component that mecanum drives rely on. */
+            vector3 force_dir = rolling_dir;
+            if (wheel->is_mecanum) {
+                float cos_a = cosf(wheel->roller_angle_rad);
+                float sin_a = sinf(wheel->roller_angle_rad);
+                vector3 perp = vector3_cross(world_up, rolling_dir);
+                /* Grip direction: perpendicular to the roller's free-slide direction.
+                 * Free-slide = cos(a)*forward + sin(a)*perp.
+                 * Grip = perp_to_free = -sin(a)*forward + cos(a)*perp. */
+                force_dir = vector3_addition(
+                    vector3_scaling(rolling_dir, -sin_a),
+                    vector3_scaling(perp, cos_a));
+                float fd_len = vector3_length(force_dir);
+                if (fd_len > 0.0001f) {
+                    force_dir = vector3_scaling(force_dir, 1.0f / fd_len);
+                } else {
+                    force_dir = rolling_dir;
+                }
+            }
+
             /* F = torque / r, clamped to friction limit */
             float traction = robot->wheel_motors[i].output_torque / r;
             if (traction > max_grip)  { traction = max_grip; }
             if (traction < -max_grip) { traction = -max_grip; }
             wheel->force_accumulator = vector3_addition(
                 wheel->force_accumulator,
-                vector3_scaling(rolling_dir, traction));
+                vector3_scaling(force_dir, traction));
         }
 
         /* --- Chassis damping: kills sliding + uncommanded yaw --- */
