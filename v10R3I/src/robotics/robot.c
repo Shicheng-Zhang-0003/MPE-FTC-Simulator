@@ -117,6 +117,26 @@ return 1;
 
         /* Set up motor for this wheel */
         motor_preset_apply(&robot->wheel_motors[i], preset);
+        /* MFS_313_TORQUE_STABILITY: reflected driveline inertia for the idle
+         * brake clamp (wheel roll + rotor·G² + one wheel's share of chassis
+         * load). Used only for the braking clamp, not for integration. */
+        float wheel_share = (CHASSIS_MASS + 4.0f * WHEEL_MASS) / 4.0f;
+        motor_compute_effective_inertia(&robot->wheel_motors[i], WHEEL_MASS, WHEEL_RADIUS, wheel_share);
+        /* MFS_310_DRIVELINE_INERTIA: give the measured axle moment of inertia to
+         * the wheel BODY itself (wheel roll + rotor·G² + one wheel's share of
+         * chassis load), so motor torque ramps the wheel up like a real geared
+         * drivetrain and the back-EMF brake coasts it down without the discrete
+         * light-wheel reversal pogo. The contact solver then also reacts to a
+         * physically-realistic wheel moment instead of the bare 2.5e-4. */
+        if (robot->drivetrain_type == FTC_DRIVETRAIN_MECANUM) {
+            rigidbody *wb = &world->bodies[robot->wheel_bodies[i]];
+            float i_axle_eff = robot->wheel_motors[i].effective_inertia;
+            if (i_axle_eff > 0.0f) {
+                wb->inertia_tensor_local.matrix[0][0] = i_axle_eff;
+                wb->inverse_inertia_tensor_local = math3_inverse(wb->inertia_tensor_local);
+                wb->inverse_inertia_system = wb->inverse_inertia_tensor_local;
+            }
+        }
     }
 
     return 0;
@@ -155,6 +175,39 @@ void ftc_robot_update(physics_world *world, ftc_robot *robot, float dt) {
         }
         float wheel_speed = vector3_dot(wheel->angular_velocity, axle);
 
+        /* MFS_310_OVERSPEED_CAP: a driven wheel can never exceed its DC-motor
+         * free speed under its own power (back-EMF guarantees it). The discrete
+         * light-wheel transient (near-zero reflected inertia before the back-EMF
+         * builds) can briefly read ~30% over free otherwise -> stress-test
+         * over-spin. Clamp the axle spin to the motor's free speed. */
+        {
+            float cap = robot->wheel_motors[i].free_speed_rad_s;
+            if (cap > 0.1f) {
+                if (wheel_speed > cap) {
+                    wheel->angular_velocity = vector3_subtraction(
+                        wheel->angular_velocity, vector3_scaling(axle, wheel_speed - cap));
+                    wheel_speed = cap;
+                } else if (wheel_speed < -cap) {
+                    wheel->angular_velocity = vector3_subtraction(
+                        wheel->angular_velocity, vector3_scaling(axle, wheel_speed + cap));
+                    wheel_speed = -cap;
+                }
+            }
+        }
+
+        /* MFS_314_DRIVE_RAMP: apply the recorded target_command through the
+         * per-second ramp so stick snaps become smooth acceleration instead of
+         * instant full-voltage (which over-runs the wheel past its contact
+         * grip and shows up as rpm overshoot on the stress test). */
+        {
+            motor *pm = &robot->wheel_motors[i];
+            float dcmd = pm->command_ramp_per_s * dt;
+            float diff = pm->target_command - pm->command;
+            if (diff > dcmd) diff = dcmd;
+            else if (diff < -dcmd) diff = -dcmd;
+            pm->command += diff;
+        }
+
         /* Update motor electrical state */
         motor_update(&robot->wheel_motors[i], wheel_speed, dt, terminal_voltage);
 
@@ -166,7 +219,16 @@ void ftc_robot_update(physics_world *world, ftc_robot *robot, float dt) {
          * within this timestep. Without this, the stall-clamped back-EMF torque
          * (~2.17 N·m) reverses the light wheel every step -> ±25 rad/s idle spin. */
         if ((fabsf(robot->wheel_motors[i].command) < 0.05f) && ((torque * wheel_speed) < 0.0f)) {
-            float mfs_i_axle = 0.5f * wheel->mass * wheel->radius * wheel->radius;
+            /* MFS_310_IDLE_BRAKE_FIX: clamp the back-EMF brake to the amount
+             * that stops the wheel within this timestep using the REFLECTED
+             * driveline inertia (wheel + rotor·G² + chassis share). The old
+             * clamp used the bare wheel inertia, making the brake nearly
+             * zero and letting the wheel free-coast — which true roller
+             * physics (near-free roller axis) turns into endless idle spin. */
+            float mfs_i_axle = robot->wheel_motors[i].effective_inertia;
+            if (mfs_i_axle <= 0.0f) {
+                mfs_i_axle = 0.5f * wheel->mass * wheel->radius * wheel->radius;
+            }
             if (mfs_i_axle > 0.0f) {
                 float mfs_max_brake = mfs_i_axle * fabsf(wheel_speed) / dt;
                 if (fabsf(torque) > mfs_max_brake) {
@@ -194,7 +256,7 @@ void ftc_robot_set_wheel_commands(ftc_robot *robot, const float *commands, int c
         if (cmd < -1.0f) {
             cmd = -1.0f;
         }
-        robot->wheel_motors[i].command = cmd;
+        robot->wheel_motors[i].target_command = cmd;
     }
 }
 

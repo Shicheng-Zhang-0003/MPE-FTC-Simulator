@@ -80,7 +80,7 @@ bool collision_sphere_cube(rigidbody *sphere, rigidbody *cube, collision_data *c
     float distance_sq = vector3_length_squared(difference);
     if (!inside && distance_sq > sphere->radius * sphere->radius)
         return false;
-    collision_output_data->object_a = sphere;
+collision_output_data->object_a = sphere;
     collision_output_data->object_b = cube;
 
     contact_point_data *cp = &collision_output_data->contacts[0];
@@ -767,6 +767,21 @@ static bool a3_task05_cached_impulses_are_usable(float normal_impulse, float tan
 }
 /* MPE_TASK_05_CACHE_VALIDATE_END */
 
+/* MFS_310_ANISO: effective mass along an arbitrary tangent direction for a
+ * contact pair. Mirrors the inline computation previously done for the single
+ * friction axis; reused for both the grip and the roller-free axis. */
+static float mfs_effective_mass_tangent(const collision_data *m, const contact_point_data *cp, const vector3 tangent) {
+    vector3 ra_cross_t = vector3_cross(cp->ra, tangent);
+    vector3 rb_cross_t = vector3_cross(cp->rb, tangent);
+    vector3 ang_a_t =
+        vector3_cross(math3_multiplication_vector3(m->object_a->inverse_inertia_system, ra_cross_t), cp->ra);
+    vector3 ang_b_t =
+        vector3_cross(math3_multiplication_vector3(m->object_b->inverse_inertia_system, rb_cross_t), cp->rb);
+    float k_tangent = m->object_a->inverse_mass + m->object_b->inverse_mass +
+                      vector3_dot(vector3_addition(ang_a_t, ang_b_t), tangent);
+    return (k_tangent > 0.0f) ? (1.0f / k_tangent) : 0.0f;
+}
+
 void collision_prepare_solver(collision_data *source, collision_data *m, float dt) { /* MFS_205 */
     *m = *source;
     static int a3_patch_19_cache_reset_done = 0; /* A3_PATCH_19_CACHE_RESET */
@@ -883,7 +898,13 @@ void collision_prepare_solver(collision_data *source, collision_data *m, float d
         vector3 rel_vel_tangent = vector3_subtraction(rel_vel, vector3_scaling(m->normal_vector, vn_initial));
         float tangent_speed = vector3_length(rel_vel_tangent);
         
-        /* MFS_MECANUM_FRICTION: for mecanum wheels, use roller-based tangent direction */
+        /* MFS_MECANUM_FRICTION: for mecanum wheels, use roller-based tangent direction.
+         * MFS_310_ANISO: mecanum floor contacts get a two-axis friction pair:
+         *   grip axis (tangent_vector, full static/kinetic mu) -- perpendicular to the
+         *   roller free-slide, and
+         *   free axis (free_tangent_vector, mu = roller_friction_coeff) -- along the
+         *   roller free-slide.
+         * Non-mecanum contacts keep the old single-axis resolution (free axis zero). */
         bool mecanum_tangent_set = false;
         rigidbody *mecanum_wheel = NULL;
         
@@ -892,6 +913,12 @@ void collision_prepare_solver(collision_data *source, collision_data *m, float d
         } else if (m->object_b && m->object_b->is_mecanum) {
             mecanum_wheel = m->object_b;
         }
+
+        cp->free_tangent_vector = vector3_zero();
+        cp->friction_grip_coeff = 0.0f;
+        cp->friction_free_coeff = 0.0f;
+        cp->effective_mass_free_tangent = 0.0f;
+        cp->accumulated_free_tangent_impulse = 0.0f;
         
         /* MFS_201_NEW08: Only apply mecanum tangent for floor contacts.
      * If the contact normal isn't mostly vertical, fall through to standard tangent. */
@@ -926,36 +953,35 @@ void collision_prepare_solver(collision_data *source, collision_data *m, float d
             if (axle_proj_len > 0.0001f) {
                 axle_proj = vector3_scaling(axle_proj, 1.0f / axle_proj_len);
                 
-                /* Roller direction is at roller_angle from axle, in the wheel's tangent plane.
-                 * For a mecanum wheel on the floor, the roller's free direction is:
-                 * cos(angle) * axle_proj + sin(angle) * (floor_normal × axle_proj)
-                 * The grip direction (friction tangent) is perpendicular to this. */
+                /* MFS_311_MECANUM_GRIP_FIX geometry (same convention as the
+                 * drivetrain traction mapper, verified against the mecanum IK):
+                 *   rolling_dir = axle x floor_normal
+                 *   perp        = floor_normal x rolling_dir
+                 *   grip_dir    = cos(a)·rolling_dir + sin(a)·perp
+                 * The grip axis is the roller's resistance direction (full mu);
+                 * the free-slide axis is perpendicular to it in the floor plane
+                 * (mu ~ 0). Using this same basis keeps the contact physics
+                 * direction-aligned with drivetrain_mecanum's wheel pattern. */
                 float cos_a = cosf(mecanum_wheel->roller_angle_rad);
                 float sin_a = sinf(mecanum_wheel->roller_angle_rad);
-                vector3 perp = vector3_cross(floor_normal, axle_proj);
-                vector3 roller_free = vector3_addition(
-                    vector3_scaling(axle_proj, cos_a),
+                vector3 rolling_dir = vector3_cross(axle_proj, floor_normal);
+                vector3 perp = vector3_cross(rolling_dir, floor_normal); /* MFS_310_ANISO_TMP */
+                vector3 grip_dir = vector3_addition(
+                    vector3_scaling(rolling_dir, cos_a),
                     vector3_scaling(perp, sin_a)
                 );
-                
-                /* Grip direction is perpendicular to roller_free, still in the floor plane */
-                vector3 grip_dir = vector3_cross(floor_normal, roller_free);
 
-/* MFS_DEBUG_STRAFE: diagnostic for mecanum strafe debugging */
-#ifdef MFS_DEBUG_STRAFE
-{
-    static int strafe_diag_counter = 0;
-    if ((strafe_diag_counter++ % 60) == 0) {
-        float grip_len = vector3_length(grip_dir);
-        printf("[STRAFE_DIAG] roller_angle=%.2f rad grip_len=%.4f mecanum=%d\n",
-               mecanum_wheel->roller_angle_rad, grip_len, mecanum_wheel->is_mecanum ? 1 : 0);
-    }
-}
-#endif
-                float grip_len = vector3_length(grip_dir);
+float grip_len = vector3_length(grip_dir);
                 if (grip_len > 0.0001f) {
                     cp->tangent_vector = vector3_scaling(grip_dir, 1.0f / grip_len);
                     mecanum_tangent_set = true;
+                    /* MFS_310_ANISO: roller free-slide axis = perpendicular to
+                     * the grip direction in the floor plane. */
+                    vector3 free_dir = vector3_cross(floor_normal, grip_dir);
+                    float free_len = vector3_length(free_dir);
+                    if (free_len > 0.0001f) {
+                        cp->free_tangent_vector = vector3_scaling(free_dir, 1.0f / free_len);
+                    }
                 }
             }
 /* MFS_127_STRAFE_DIAG: Conditional diagnostics for mecanum strafe debugging.
@@ -968,15 +994,17 @@ void collision_prepare_solver(collision_data *source, collision_data *m, float d
             if (!mecanum_tangent_set) {
                 cp->tangent_vector = vector3_scaling(rel_vel_tangent, -1.0f / tangent_speed);
             }
-            vector3 ra_cross_t = vector3_cross(cp->ra, cp->tangent_vector);
-            vector3 rb_cross_t = vector3_cross(cp->rb, cp->tangent_vector);
-            vector3 ang_a_t =
-                vector3_cross(math3_multiplication_vector3(m->object_a->inverse_inertia_system, ra_cross_t), cp->ra);
-            vector3 ang_b_t =
-                vector3_cross(math3_multiplication_vector3(m->object_b->inverse_inertia_system, rb_cross_t), cp->rb);
-            float k_tangent = m->object_a->inverse_mass + m->object_b->inverse_mass +
-                              vector3_dot(vector3_addition(ang_a_t, ang_b_t), cp->tangent_vector);
-            cp->effective_mass_tangent = (k_tangent > 0.0f) ? (1.0f / k_tangent) : 0.0f;
+            cp->effective_mass_tangent = mfs_effective_mass_tangent(m, cp, cp->tangent_vector);
+            if (mecanum_tangent_set && (vector3_length_squared(cp->free_tangent_vector) > 0.0001f)) {
+                /* MFS_310_ANISO: roller-free axis mass + per-axis friction coefficients. */
+                cp->effective_mass_free_tangent = mfs_effective_mass_tangent(m, cp, cp->free_tangent_vector);
+                cp->friction_grip_coeff = fminf(m->object_a->friction_static, m->object_b->friction_static);
+                float kinetic = fminf(m->object_a->friction_kinetic, m->object_b->friction_kinetic);
+                if (cp->friction_grip_coeff < kinetic) {
+                    cp->friction_grip_coeff = kinetic;
+                }
+                cp->friction_free_coeff = fminf(kinetic, g_cfg.solver.roller_friction_coeff);
+            }
         } else {
             cp->tangent_vector = vector3_zero();
             cp->effective_mass_tangent = 0.0f;
@@ -1076,6 +1104,42 @@ void collision_resolve_iterative(collision_data *m) {
             lambda_t = cp->accumulated_tangent_impulse - old_tangent_impulse;
             if (lambda_t != 0.0f) {
                 vector3 friction_impulse = vector3_scaling(tangent, lambda_t);
+                if (!m->object_a->static_state) {
+                    m->object_a->velocity = vector3_subtraction(
+                        m->object_a->velocity, vector3_scaling(friction_impulse, m->object_a->inverse_mass));
+                    m->object_a->angular_velocity =
+                        vector3_subtraction(m->object_a->angular_velocity,
+                                            math3_multiplication_vector3(m->object_a->inverse_inertia_system,
+                                                                         vector3_cross(cp->ra, friction_impulse)));
+                }
+                if (!m->object_b->static_state) {
+                    m->object_b->velocity = vector3_addition(
+                        m->object_b->velocity, vector3_scaling(friction_impulse, m->object_b->inverse_mass));
+                    m->object_b->angular_velocity =
+                        vector3_addition(m->object_b->angular_velocity,
+                                         math3_multiplication_vector3(m->object_b->inverse_inertia_system,
+                                                                      vector3_cross(cp->rb, friction_impulse)));
+                }
+            }
+        }
+
+        /* MFS_310_ANISO: resolve the roller-free axis for mecanum floor contacts.
+         * Near-zero coefficient -> wheel surface slides freely along the roller,
+         * while the grip axis (resolved above) carries the driving traction. */
+        if (vector3_length_squared(cp->free_tangent_vector) > 0.0001f) {
+            va = vector3_addition(m->object_a->velocity, vector3_cross(m->object_a->angular_velocity, cp->ra));
+            vb = vector3_addition(m->object_b->velocity, vector3_cross(m->object_b->angular_velocity, cp->rb));
+            rel_vel = vector3_subtraction(vb, va);
+            float vt_free = vector3_dot(rel_vel, cp->free_tangent_vector);
+
+            float max_friction_free = cp->accumulated_normal_impulse * cp->friction_free_coeff;
+            float lambda_f = -vt_free * cp->effective_mass_free_tangent;
+            float old_free_impulse = cp->accumulated_free_tangent_impulse;
+            cp->accumulated_free_tangent_impulse =
+                fmaxf(-max_friction_free, fminf(old_free_impulse + lambda_f, max_friction_free));
+            lambda_f = cp->accumulated_free_tangent_impulse - old_free_impulse;
+            if (lambda_f != 0.0f) {
+                vector3 friction_impulse = vector3_scaling(cp->free_tangent_vector, lambda_f);
                 if (!m->object_a->static_state) {
                     m->object_a->velocity = vector3_subtraction(
                         m->object_a->velocity, vector3_scaling(friction_impulse, m->object_a->inverse_mass));

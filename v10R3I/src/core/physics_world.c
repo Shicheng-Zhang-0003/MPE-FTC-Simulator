@@ -20,6 +20,8 @@
 
 static physics_world g_physics_world = {.bodies = NULL, .body_count = 0, .body_capacity = 0, .next_object_id = 1};
 
+#define MFS_WORLD_MAGIC 0x4D503231u /* "MP21" */
+
 static broadphase_pair world_pairs[mpe_max_broadphase_pairs];
 static collision_data world_manifolds[a3_max_manifolds];
 
@@ -27,16 +29,18 @@ void physics_world_init(physics_world *world) {
     if (!world) {
         return;
     }
-    /* MFS_300_LIFECYCLE: Free old allocations before memset to prevent leaks. */
-    if (world->bodies) {
+    /* MFS_300_LIFECYCLE: Free old allocations before memset to prevent leaks.
+     * MFS_310B: only free() if *we* previously initialized this world. A fresh
+     * stack/global world contains garbage in ->bodies, and free()-ing a garbage
+     * pointer crashed every test binary that declared `physics_world world;`. */
+    if (world->magic == MFS_WORLD_MAGIC) {
         free(world->bodies);
         world->bodies = NULL;
-    }
-    if (world->world_contact_cache) {
         free(world->world_contact_cache);
         world->world_contact_cache = NULL;
     }
     memset(world, 0, sizeof(physics_world));
+    world->magic = MFS_WORLD_MAGIC;
 
     if (!world->bodies) {
         world->bodies = (rigidbody *) malloc((size_t) mpe_max_bodies * sizeof(rigidbody));
@@ -47,6 +51,7 @@ void physics_world_init(physics_world *world) {
             (cached_contact *) malloc((size_t) max_cached_contacts * sizeof(cached_contact)); /* MFS_131A */
     }
     world->body_count = 0;
+    world->magic = MFS_WORLD_MAGIC;
     if (world->next_object_id == 0) {
         world->next_object_id = 1;
     }
@@ -84,17 +89,14 @@ void physics_world_cleanup(physics_world *world) {
     if (!world) {
         return;
     }
-    if (world->bodies) {
+    /* MFS_310B: only free buffers we allocated. */
+    if (world->magic == MFS_WORLD_MAGIC) {
         free(world->bodies);
         world->bodies = NULL;
-    }
-    if (world->world_contact_cache) {
         free(world->world_contact_cache); /* MFS_131A */
         world->world_contact_cache = NULL;
     }
-    world->world_contact_cache_count = 0;
-    world->body_count = 0;
-    world->body_capacity = 0;
+    memset(world, 0, sizeof(physics_world));
 }
 
 int physics_world_add_sphere(physics_world *world, float radius, float mass, vector3 position) {

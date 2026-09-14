@@ -116,7 +116,7 @@ void simulation_input_dispatch(GtkWidget *parent_window) {
         gamepad_state *mfs_pad = gamepad_get_primary();
         if (gamepad_is_connected(mfs_pad)) {
             drive_forward = gamepad_get_axis(mfs_pad, gamepad_axis_left_y);
-            drive_strafe  = -gamepad_get_axis(mfs_pad, gamepad_axis_left_x); /* MFS_160_STRAFE_NEG */
+            drive_strafe  = gamepad_get_axis(mfs_pad, gamepad_axis_left_x); /* MFS_311: negated removed — drivetrain goes +X on +strafe */
             drive_rotate  = gamepad_get_axis(mfs_pad, gamepad_axis_right_x);
             /* clamp to [-1, 1] */
             if (drive_forward >  1.0f) drive_forward =  1.0f;
