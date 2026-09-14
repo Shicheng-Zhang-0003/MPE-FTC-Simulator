@@ -17,14 +17,15 @@ OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(SOURCES))
 DEPS := $(OBJECTS:.o=.d)
 
 engine: $(OBJECTS)
-	$(CC) $(CFLAGS) $(OBJECTS) $(LIBS) -o engine
+	$(file > link.rsp,$(OBJECTS))
+	$(CC) $(CFLAGS) @link.rsp $(LIBS) -o engine
 
 $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 clean:
-	rm -rf $(BUILD_DIR) engine test_*
+	rm -rf $(BUILD_DIR) engine test_* link.rsp
 
 .PHONY: clean
 

@@ -330,24 +330,24 @@ void rb_integrate_velocity(rigidbody *rigid_body, float delta_time, float linear
         rigid_body->velocity = vector3_zero();
     }
 
+    /* MFS_ROLLING_FRICTION_FIX: Apply rolling friction torque BEFORE consuming
+     * the accumulator. Previously this was after angular_acceleration was computed,
+     * so the torque was added to the accumulator then immediately cleared — dead code. */
+    if (rigid_body->roll_friction_coeff > 0.0f && !rigid_body->static_state) {
+        float speed_sq = vector3_length_squared(rigid_body->angular_velocity);
+        if (speed_sq > 0.0f) {
+            vector3 angular_dir = vector3_normalisation(rigid_body->angular_velocity);
+            float roll_torque_mag = rigid_body->roll_friction_coeff * speed_sq;
+            vector3 roll_torque = vector3_scaling(angular_dir, -roll_torque_mag);
+            rigid_body->torque_accumulator = vector3_addition(rigid_body->torque_accumulator, roll_torque);
+        }
+    }
+
     rigid_body->angular_acceleration =
         math3_multiplication_vector3(rigid_body->inverse_inertia_system, rigid_body->torque_accumulator);
     rigid_body->angular_velocity =
         vector3_addition(rigid_body->angular_velocity, vector3_scaling(rigid_body->angular_acceleration, delta_time));
     rigid_body->angular_velocity = vector3_scaling(rigid_body->angular_velocity, angular_damping);
-
-    // Apply rolling friction - torque opposing angular velocity
-    if (rigid_body->roll_friction_coeff > 0.0f && !rigid_body->static_state) {
-        float speed_sq = vector3_length_squared(rigid_body->angular_velocity);
-        if (speed_sq > 0.0f) {
-            vector3 angular_dir = vector3_normalisation(rigid_body->angular_velocity);
-            // Rolling friction torque proportional to angular speed and friction coeff
-            float roll_torque_mag = rigid_body->roll_friction_coeff * speed_sq;
-            vector3 roll_torque = vector3_scaling(angular_dir, -roll_torque_mag);
-            // Add to torque accumulator (will be applied via integrate)
-            rigid_body->torque_accumulator = vector3_addition(rigid_body->torque_accumulator, roll_torque);
-        }
-    }
 
     if (vector3_length_squared(rigid_body->angular_velocity) < 0.0001f) {
         rigid_body->angular_velocity = vector3_zero();

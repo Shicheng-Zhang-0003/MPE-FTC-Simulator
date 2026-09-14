@@ -1266,6 +1266,7 @@ bool collision_cylinder_cube(rigidbody *cyl, rigidbody *cube,
     const int SAMPLES = 5;
     float best_dist = 1e30f;
     vector3 best_on_obb = cube->position;
+    vector3 best_cyl_pt = cyl->position; /* MFS_CYL_CUBE_FIX: track nearest cylinder sample */
 
     for (int s = 0; s <= SAMPLES; s++) {
         float t = (float)s / (float)SAMPLES;
@@ -1294,6 +1295,7 @@ bool collision_cylinder_cube(rigidbody *cyl, rigidbody *cube,
         if (d < best_dist) {
             best_dist = d;
             best_on_obb = on_obb;
+            best_cyl_pt = pt;
         }
     }
 
@@ -1303,10 +1305,13 @@ bool collision_cylinder_cube(rigidbody *cyl, rigidbody *cube,
     out->object_b = cube;
     out->contact_count = 1;
 
-    if (best_dist > 0.0001f) {
-        out->normal_vector = vector3_scaling(
-            vector3_subtraction(cyl->position, best_on_obb),
-            1.0f / vector3_length(vector3_subtraction(cyl->position, best_on_obb)));
+    /* MFS_CYL_CUBE_FIX: Normal from nearest cylinder SURFACE point to nearest OBB point.
+     * Previously used cyl->position (midpoint), which is wrong for off-center contacts
+     * and produces incorrect torque in the solver. */
+    vector3 cyl_to_obb = vector3_subtraction(best_on_obb, best_cyl_pt);
+    float cyl_to_obb_len = vector3_length(cyl_to_obb);
+    if (cyl_to_obb_len > 0.0001f) {
+        out->normal_vector = vector3_scaling(cyl_to_obb, 1.0f / cyl_to_obb_len);
     } else {
         out->normal_vector = (vector3){0.0f, 1.0f, 0.0f};
     }

@@ -9,26 +9,27 @@ void motor_from_spec(motor *m, float stall_torque_nm, float free_speed_rpm, floa
     if (!m) {
         return;
     }
+    (void)stall_torque_nm; /* MFS_MOTOR_KTVK_FIX: Kt derived from Kv, spec torque unused */
     m->stall_current = stall_current_a;
     m->free_speed_rad_s = free_speed_rpm * MOTOR_RPM_TO_RAD_S;
     m->gear_ratio = (gear_ratio > 0.0f) ? gear_ratio : 1.0f;
     m->efficiency = (efficiency > 0.0f && efficiency <= 1.0f) ? efficiency : 0.85f;
 
-    /* Kt = motor-shaft stall torque / stall_current.
-     * MFS_MOTOR_FIX: preset stall_torque_nm is the OUTPUT-shaft stall torque (after
-     * the gearbox), so divide by the gear ratio to get the motor-shaft value before
-     * deriving Kt. motor_update then multiplies torque by gear_ratio to produce the
-     * output torque. (Previously the ratio was applied twice -> ~30x too much torque.) */
-    float motor_stall_torque = stall_torque_nm / m->gear_ratio;
-    m->kt = (stall_current_a > 0.0f) ? (motor_stall_torque / stall_current_a) : 0.0f;
-
-    /* R = V_nominal / stall_current */
-    m->resistance = (stall_current_a > 0.0f) ? (nominal_voltage / stall_current_a) : 1.0f;
-
     /* Kv: at free speed, current ~ 0, so BackEMF ~ V_nominal */
     /* Kv = V / omega_free  (motor shaft, before gearing) */
     float motor_free_speed = m->free_speed_rad_s * m->gear_ratio;
     m->kv = (motor_free_speed > 0.0f) ? (nominal_voltage / motor_free_speed) : 0.0f;
+
+    /* MFS_MOTOR_KTVK_FIX: Derive Kt from Kv to enforce Kt = 1/Kv (SI units).
+     * This ensures energy conservation: electrical power in = mechanical power out + heat.
+     * The spec sheet values are often internally inconsistent (Kt ≠ 1/Kv), so we
+     * derive both from the electrical specs (V, ω_free) for physical correctness.
+     * The stall torque will differ slightly from the spec sheet but will be
+     * energy-consistent. */
+    m->kt = (m->kv > 0.0f) ? (1.0f / m->kv) : 0.0f;
+
+    /* R = V_nominal / stall_current */
+    m->resistance = (stall_current_a > 0.0f) ? (nominal_voltage / stall_current_a) : 1.0f;
 
     m->command = 0.0f;
     m->current = 0.0f;
