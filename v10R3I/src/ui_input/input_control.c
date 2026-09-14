@@ -5,6 +5,8 @@
 #include <gtk/gtk.h>
 #include <gdk/gdkkeysyms.h>
 #include <stdbool.h>
+#include "robotics/robot.h"
+#include "robotics/gui_robot_registry.h"
 extern camera main_camera_fov;
 extern input_status main_inputs;
 extern int selected_object;
@@ -178,6 +180,7 @@ if (input_state -> is_menu_open) {
         if (event -> keyval == GDK_KEY_1) {input_state -> spawner_menu_level = 2;}
         if (event -> keyval == GDK_KEY_2) {input_state -> spawner_menu_level = 5;}
         if (event -> keyval == GDK_KEY_3) {input_state -> spawner_menu_level = 8;}
+        if (event -> keyval == GDK_KEY_4) {gui_robot_spawn(5.0f, ftc_robot_rest_height(), 5.0f, MOTOR_GB_5203_30);}
     } else if (input_state -> spawner_menu_level == 2) {
         if (event -> keyval == GDK_KEY_1) {input_state -> spawner_menu_level = 3;}
         if (event -> keyval == GDK_KEY_2) {input_state -> spawner_menu_level = 4;}

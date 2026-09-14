@@ -2,11 +2,17 @@
 * Owns: scene menu key handling, editor menu update, config menu update.
 */
 #include "../mpe_engine.h"
+#include "debug_terminal.h"
 
 void simulation_menu_dispatch(GtkWidget *parent_window) {
     /* Scene menu: 9 key bindings */
     if (main_inputs.menu_1_pressed) {
-        save_scene("status/scene.dat");
+        int scene_ok = save_scene("status/scene.dat");
+        if (scene_ok) {
+            fprintf(stderr, "scene: saved to status/scene.dat\n");
+        } else {
+            fprintf(stderr, "mpe: scene: save failed\n");
+        }
         main_inputs.menu_1_pressed = false;
         main_inputs.is_menu_open = false;
     }

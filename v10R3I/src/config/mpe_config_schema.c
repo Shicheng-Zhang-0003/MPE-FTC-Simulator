@@ -38,6 +38,9 @@ static mpe_param s_registry[] = {
     {"world.drag", "Air Drag Coefficient", "Per-tick velocity retention (0.1 = heavy drag, 1.0 = none)", p_float,
      cat_world, &g_cfg.world.drag, 0.99, 0.1, 1.0, false},
 
+    {"world.angular_damping_factor", "Angular Drag Factor", "Angular velocity retention factor per tick (0 = heavy damping, 1 = none)", p_float,
+     cat_world, &g_cfg.world.angular_damping_factor, 0.97f, 0.001f, 1.0, false},
+
     {"world.floor_friction_s", "Floor Friction (Static)", "Static friction coefficient for floor contacts", p_float,
      cat_world, &g_cfg.world.floor_friction_s, 0.2, 0.0, 5.0, false},
 

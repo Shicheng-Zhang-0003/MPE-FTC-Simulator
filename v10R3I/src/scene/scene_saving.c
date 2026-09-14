@@ -48,8 +48,10 @@ int save_scene(const char *file_destination_path) {
         write_float(f, rb->restitution);
         write_float(f, rb->friction_static);
         write_float(f, rb->friction_kinetic);
-        write_int(f, rb->static_state ? 1 : 0);
-        write_int(f, (int32_t) rb->object_id); /* MPE_FTC_058 */
+write_int(f, rb->static_state ? 1 : 0);
+    write_int(f, rb->is_sleeping ? 1 : 0);
+    write_float(f, rb->sleep_timer);
+    write_int(f, (int32_t) rb->object_id); /* MPE_FTC_058 */
     write_float(f, rb->cylinder_half_length); /* MFS_203_R304: save cylinder geometry */
     }
     /* MFS_313: Iterate ALL joint slots, not just current_joint_count.

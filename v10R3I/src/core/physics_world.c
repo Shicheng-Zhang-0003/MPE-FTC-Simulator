@@ -255,7 +255,7 @@ void physics_world_step(physics_world *world, float dt) {
     }
 
     float linear_damping = powf(g_cfg.world.drag, dt);
-    float angular_damping = powf(g_cfg.world.drag * 0.97f, dt);
+    float angular_damping = powf(g_cfg.world.drag * g_cfg.world.angular_damping_factor, dt);
     constraint_apply_motors(world->bodies, world->body_count, dt); /* MPE_FTC_067 */
     for (int i = 0; i < world->body_count; i++) {
         rb_integrate_velocity(&world->bodies[i], dt, linear_damping, angular_damping);

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # V-04: F10 long-run validation (3600 ticks / 60s). GUI interaction required.
 set -uo pipefail
-SRC="v15R2/src"
+SRC="v10R3I/src"
 [[ -d "$SRC" ]] || { echo "ERROR: $SRC not found." >&2; exit 1; }
 
 echo "=== V-04: F10 Long-Run Validation ==="
@@ -14,7 +14,7 @@ cat <<'EOF'
 
 This test requires the GUI. Steps:
 
-  1. cd v15R2/src && ./engine
+  1. cd v10R3I/src && ./engine
   2. When the window opens, press  F10
        - Spawns the long-run scene (stack + pile + spheres)
        - A countdown 'LR:NNs' appears in the top-left overlay

@@ -47,8 +47,9 @@ typedef struct {
         float drag;
         float floor_friction_s;
         float floor_friction_k;
-    float rolling_resistance_coeff; /* MFS_132 */
-    } world;
+float rolling_resistance_coeff; /* MFS_132 */
+    float angular_damping_factor; /* MPE_TASK_V15R2_ANGULAR_DAMPING */
+} world;
 
     struct {
         int solver_iterations;

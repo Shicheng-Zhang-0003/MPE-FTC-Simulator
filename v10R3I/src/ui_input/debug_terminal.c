@@ -3035,7 +3035,9 @@ static void cmd_sudo(int argc, char **argv) {
                 sub_command[offset] = '\0';
             }
         }
+        term_sudo_active = true;
         term_execute(sub_command);
+        term_sudo_active = false;
         return;
     }
     term_dim("[sudo] bypassing game-mode restriction\n");
