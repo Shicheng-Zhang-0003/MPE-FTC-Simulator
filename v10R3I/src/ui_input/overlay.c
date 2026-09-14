@@ -189,7 +189,8 @@ void overlay_update(void) {
                     spawn_type_text = "Cube";
                 }
                 snprintf(spawner_text, sizeof(spawner_text),
-                         "-- Spawner Menu --\n1: Sphere\n2: Cube\n3: Current Type: %s", spawn_type_text);
+                         "-- Spawner Menu --\n1: Sphere\n2: Cube\n3: Current Type: %s\n4: Spawn Robot",
+                         spawn_type_text);
             } else if (main_inputs.spawner_menu_level == 2) {
                 snprintf(spawner_text, sizeof(spawner_text), "-- Sphere Settings --\n1: Mass\n2: Radius");
             } else if (main_inputs.spawner_menu_level == 3) {

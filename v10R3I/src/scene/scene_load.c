@@ -45,23 +45,25 @@ int scene_loading(const char *file_source_path) {
     }
 
     /* Staging buffer: holds raw body data until all reads succeed */
-    typedef struct {
-        int32_t type_int;
-        float mass;
-        float radius;
-        vector3 half_extensions;
-        vector3 position;
-        vector3 velocity;
-        vector3 angular_velocity;
-        vector4 orientation;
-        vector3 colour;
-        float restitution;
-        float friction_static;
-        float friction_kinetic;
-        int32_t static_int;
-        int32_t saved_object_id;
-        float cylinder_half_length;
-    } staged_body;
+typedef struct {
+    int32_t type_int;
+    float mass;
+    float radius;
+    vector3 half_extensions;
+    vector3 position;
+    vector3 velocity;
+    vector3 angular_velocity;
+    vector4 orientation;
+    vector3 colour;
+    float restitution;
+    float friction_static;
+    float friction_kinetic;
+    int32_t static_int;
+    int32_t saved_object_id;
+    float cylinder_half_length;
+    bool is_sleeping;
+    float sleep_timer;
+} staged_body;
 
     static staged_body staging[mpe_max_bodies];
     int staged_count = 0;
@@ -95,6 +97,15 @@ int scene_loading(const char *file_source_path) {
         if (!read_float(f, &sb->friction_static)) break;
         if (!read_float(f, &sb->friction_kinetic)) break;
         if (!read_int(f, &sb->static_int)) break;
+
+        sb->is_sleeping = sb->static_int != 0;
+        if (sb->is_sleeping) {
+            if (!read_float(f, &sb->sleep_timer)) {
+                sb->sleep_timer = 0.0f;
+            }
+        } else {
+            sb->sleep_timer = 0.0f;
+        }
 
         if (version >= 150) {
             if (!read_int(f, &sb->saved_object_id)) break;
@@ -164,7 +175,29 @@ int scene_loading(const char *file_source_path) {
         rigidbody_sanitize(&obj_per_scene[i]);
         rigidbody_update_axes(&obj_per_scene[i]);
 
-        obj_per_scene[i].object_id = scene_allocate_object_id();
+        obj_per_scene[i].is_sleeping = sb->is_sleeping;
+        obj_per_scene[i].sleep_timer = sb->sleep_timer;
+        if (obj_per_scene[i].is_sleeping) {
+            rigidbody_sanitize(&obj_per_scene[i]);
+        }
+
+        /* MFS_312: Preserve object ID if possible, otherwise allocate new one. */
+        if (sb->saved_object_id > 0) {
+            obj_per_scene[i].object_id = sb->saved_object_id;
+            /* Verify the ID is not already in use; if it is, allocate a new one. */
+            bool id_in_use = false;
+            for (int j = 0; j < object_count; j++) {
+                if (j != i && obj_per_scene[j].object_id == obj_per_scene[i].object_id) {
+                    id_in_use = true;
+                    break;
+                }
+            }
+            if (id_in_use) {
+                obj_per_scene[i].object_id = scene_allocate_object_id();
+            }
+        } else {
+            obj_per_scene[i].object_id = scene_allocate_object_id();
+        }
         if ((version >= 150) && (sb->saved_object_id > 0)) {
             scene_id_remap_add((uint32_t) sb->saved_object_id, obj_per_scene[i].object_id);
         } /* MPE_FTC_058 */

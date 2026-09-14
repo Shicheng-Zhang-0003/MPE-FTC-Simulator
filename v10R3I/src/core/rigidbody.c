@@ -336,6 +336,19 @@ void rb_integrate_velocity(rigidbody *rigid_body, float delta_time, float linear
         vector3_addition(rigid_body->angular_velocity, vector3_scaling(rigid_body->angular_acceleration, delta_time));
     rigid_body->angular_velocity = vector3_scaling(rigid_body->angular_velocity, angular_damping);
 
+    // Apply rolling friction - torque opposing angular velocity
+    if (rigid_body->roll_friction_coeff > 0.0f && !rigid_body->static_state) {
+        float speed_sq = vector3_length_squared(rigid_body->angular_velocity);
+        if (speed_sq > 0.0f) {
+            vector3 angular_dir = vector3_normalisation(rigid_body->angular_velocity);
+            // Rolling friction torque proportional to angular speed and friction coeff
+            float roll_torque_mag = rigid_body->roll_friction_coeff * speed_sq;
+            vector3 roll_torque = vector3_scaling(angular_dir, -roll_torque_mag);
+            // Add to torque accumulator (will be applied via integrate)
+            rigid_body->torque_accumulator = vector3_addition(rigid_body->torque_accumulator, roll_torque);
+        }
+    }
+
     if (vector3_length_squared(rigid_body->angular_velocity) < 0.0001f) {
         rigid_body->angular_velocity = vector3_zero();
     }
@@ -542,6 +555,7 @@ void rigidbody_initialisation_cylinder(rigidbody *rigid_body, float radius, floa
     rigid_body->nice_value = 0;
     rigid_body->friction_static = 0.4f;
     rigid_body->friction_kinetic = 0.3f;
+    rigid_body->roll_friction_coeff = 0.01f; /* Default rolling friction for wheels */
 rigid_body->driven_this_tick = false; /* MFS_169 */
     
     rigidbody_update_inertia_cylinder(rigid_body);

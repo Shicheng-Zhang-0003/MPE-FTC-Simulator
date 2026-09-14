@@ -15,7 +15,7 @@ fi
 
 LOG="fix_log.txt"
 echo "" >> "$LOG"
-echo "=== MPE/FTC Fix Run: $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG"
+echo "=== MPE/623-FTC Fix Run: $(date '+%Y-%m-%d %H:%M:%S') ===" >> "$LOG"
 
 PASSED=0; FAILED=0; BUILD_FAILS=0
 
