@@ -1,15 +1,43 @@
 #include <gtk/gtk.h>
 #include "mpe_engine.h"
+#include "ui_input/input_control.h"
 camera main_camera_fov;
 input_status main_inputs;
-static guint physics_timeout_id = 0;
+static guint physics_tick_id = 0;
+static GtkWidget *g_gl_area_widget = NULL;
+static GtkWidget *g_main_window = NULL;
+
+/* Frame-synchronized tick callback - runs at display refresh rate */
+static gboolean on_frame_tick(GtkWidget *widget, GdkFrameClock *frame_clock, gpointer user_data) {
+    (void) widget;
+    (void) user_data;
+    
+    /* Swap input buffers: events wrote to write buffer, now make it readable */
+    input_swap_buffers();
+    
+    /* Copy read buffer to main_inputs for physics/camera systems */
+    input_status *read_buf = input_get_read_buffer();
+    main_inputs = *read_buf;
+    
+    /* Clear mouse deltas after consumption */
+    main_inputs.mouse_delta_x = 0.0f;
+    main_inputs.mouse_delta_y = 0.0f;
+    
+    /* Run physics step */
+    physics_step_increment(g_gl_area_widget);
+    
+    /* Queue render */
+    gtk_widget_queue_draw(g_gl_area_widget);
+    
+    return G_SOURCE_CONTINUE;
+}
 
 static void on_main_window_destroy(GtkWidget *widget, gpointer user_data) {
     (void) widget;
     (void) user_data;
-    if (physics_timeout_id) {
-        g_source_remove(physics_timeout_id);
-        physics_timeout_id = 0;
+    if (physics_tick_id) {
+        g_source_remove(physics_tick_id);
+        physics_tick_id = 0;
     }
     render_cleanup();
     broadphase_cleanup();
@@ -45,7 +73,7 @@ int main_algorithm(int argc, char *argv[]) {
     #ifdef __linux__
     #ifdef __linux__
     g_setenv("GDK_BACKEND", "x11", TRUE);
-#endif /* WIN_PORT_X11_GUARD */
+    #endif /* WIN_PORT_X11_GUARD */
     #endif
     gtk_init(&argc, &argv);
     mpe_config_init(); /* MPE_TASK_29_CONFIG_INIT */
@@ -69,35 +97,36 @@ int main_algorithm(int argc, char *argv[]) {
     //Camera Init
     initialize_camera(&main_camera_fov, (vector3){0.0f, 20.0f, 50.0f});
     initialize_input(&main_inputs);
+    input_init_buffers();
     //Widgeting
-    GtkWidget *main_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    g_signal_connect(main_window, "destroy", G_CALLBACK(on_main_window_destroy), NULL);
-    GtkWidget *gl_area_widget = gtk_gl_area_new();
-    gtk_gl_area_set_has_depth_buffer(GTK_GL_AREA(gl_area_widget), TRUE);
+    g_main_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    g_signal_connect(g_main_window, "destroy", G_CALLBACK(on_main_window_destroy), NULL);
+    g_gl_area_widget = gtk_gl_area_new();
+    gtk_gl_area_set_has_depth_buffer(GTK_GL_AREA(g_gl_area_widget), TRUE);
     //Keyboard and Mouse Events
-    gtk_widget_add_events(main_window, GDK_KEY_PRESS_MASK | GDK_KEY_RELEASE_MASK | GDK_POINTER_MOTION_MASK |
+    gtk_widget_add_events(g_main_window, GDK_KEY_PRESS_MASK | GDK_KEY_RELEASE_MASK | GDK_POINTER_MOTION_MASK |
                                            GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK);
     //Signalling
-    g_signal_connect(gl_area_widget, "render", G_CALLBACK(on_rendered), NULL);
-    g_signal_connect(gl_area_widget, "realize", G_CALLBACK(when_realised), NULL);
-    g_signal_connect(main_window, "key-press-event", G_CALLBACK(on_keypress), &main_inputs);
-    g_signal_connect(main_window, "key-release-event", G_CALLBACK(on_key_released), &main_inputs);
-    g_signal_connect(main_window, "focus-out-event", G_CALLBACK(on_focus_out), &main_inputs);
-    g_signal_connect(gl_area_widget, "focus-out-event", G_CALLBACK(on_focus_out), &main_inputs);
-    g_signal_connect(main_window, "motion-notify-event", G_CALLBACK(on_mouse_movements), NULL);
-    g_signal_connect(main_window, "button-press-event", G_CALLBACK(on_button_press), &main_inputs);
-    g_signal_connect(main_window, "button-release-event", G_CALLBACK(on_button_release), &main_inputs);
+    g_signal_connect(g_gl_area_widget, "render", G_CALLBACK(on_rendered), NULL);
+    g_signal_connect(g_gl_area_widget, "realize", G_CALLBACK(when_realised), NULL);
+    g_signal_connect(g_main_window, "key-press-event", G_CALLBACK(on_keypress), &main_inputs);
+    g_signal_connect(g_main_window, "key-release-event", G_CALLBACK(on_key_released), &main_inputs);
+    g_signal_connect(g_main_window, "focus-out-event", G_CALLBACK(on_focus_out), &main_inputs);
+    g_signal_connect(g_gl_area_widget, "focus-out-event", G_CALLBACK(on_focus_out), &main_inputs);
+    g_signal_connect(g_main_window, "motion-notify-event", G_CALLBACK(on_mouse_movements), NULL);
+    g_signal_connect(g_main_window, "button-press-event", G_CALLBACK(on_button_press), &main_inputs);
+    g_signal_connect(g_main_window, "button-release-event", G_CALLBACK(on_button_release), &main_inputs);
     //Add Objects
-    GtkWidget *ui_overlay_layout = overlay_initialise(gl_area_widget);
-    gtk_container_add(GTK_CONTAINER(main_window), ui_overlay_layout);
+    GtkWidget *ui_overlay_layout = overlay_initialise(g_gl_area_widget);
+    gtk_container_add(GTK_CONTAINER(g_main_window), ui_overlay_layout);
     //Focus and Event Catching
-    gtk_widget_set_can_focus(main_window, TRUE);
-    gtk_widget_grab_focus(main_window);
-    //Physics Step Loop (16ms)
-    physics_timeout_id = g_timeout_add(16, physics_step_increment, gl_area_widget);
+    gtk_widget_set_can_focus(g_main_window, TRUE);
+    gtk_widget_grab_focus(g_main_window);
+    //Frame-synchronized physics/render loop
+    physics_tick_id = gtk_widget_add_tick_callback(g_gl_area_widget, on_frame_tick, NULL, NULL);
     //Show Window
-    gtk_widget_show_all(main_window);
-    gtk_widget_grab_focus(main_window);
+    gtk_widget_show_all(g_main_window);
+    gtk_widget_grab_focus(g_main_window);
     frame_timer_init(&main_timer);
     gtk_main();
     /* MPE_TASK_34_CONFIG_SAVE_BEGIN */

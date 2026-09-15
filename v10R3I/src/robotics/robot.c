@@ -101,15 +101,23 @@ return 1;
         }
 
         /* MFS_MECANUM_REAL: Mark wheel as mecanum with roller angle.
-         * Standard layout: front-left +45°, front-right -45°, back-left -45°, back-right +45° */
+         * Standard FTC mecanum (axle along X, robot forward = +Z):
+         *   FL (-X,+Z): roller at -45° from forward (+Z) = +45° from axle (+X)
+         *   FR (+X,+Z): roller at +45° from forward = -45° from axle
+         *   BL (-X,-Z): roller at +45° from forward = -45° from axle
+         *   BR (+X,-Z): roller at -45° from forward = +45° from axle
+         * Matches drivetrain_mecanum IK: positive strafe = +X world. */
         float roller_angle = 0.0f;
-        if (i == 0) roller_angle = 0.78539816339f;       /* front-left: +45° */
-        if (i == 1) roller_angle = -0.78539816339f;      /* front-right: -45° */
-        if (i == 2) roller_angle = -0.78539816339f;      /* back-left: -45° */
-        if (i == 3) roller_angle = 0.78539816339f;       /* back-right: +45° */
+        if (i == 0) roller_angle = -0.78539816339f;      /* front-left: -45° from forward */
+        if (i == 1) roller_angle = 0.78539816339f;       /* front-right: +45° from forward */
+        if (i == 2) roller_angle = 0.78539816339f;       /* back-left: +45° from forward */
+        if (i == 3) roller_angle = -0.78539816339f;      /* back-right: -45° from forward */
         
         if (robot->drivetrain_type == FTC_DRIVETRAIN_MECANUM) {
                 rigidbody_set_mecanum(&world->bodies[robot->wheel_bodies[i]], true, roller_angle);
+                /* Mecanum wheels need high friction on grip axis (perpendicular to rollers) */
+                world->bodies[robot->wheel_bodies[i]].friction_static = 1.0f;
+                world->bodies[robot->wheel_bodies[i]].friction_kinetic = 0.8f;
             } else {
                 rigidbody_set_mecanum(&world->bodies[robot->wheel_bodies[i]], false, 0.0f);
             }

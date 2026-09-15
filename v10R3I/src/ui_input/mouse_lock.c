@@ -2,6 +2,7 @@
 #include "mouse_lock.h"
 #include "input_control.h"
 extern input_status main_inputs;
+
 void mouse_lock_enable(GtkWidget *window_widget) {
     GdkWindow *gdk_window_handle = gtk_widget_get_window(window_widget);
     if (!(gdk_window_handle)) {
@@ -11,11 +12,20 @@ void mouse_lock_enable(GtkWidget *window_widget) {
     GdkDisplay *gdk_display_instance = gdk_window_get_display(gdk_window_handle);
     GdkSeat *gdk_seat_instance = gdk_display_get_default_seat(gdk_display_instance);
     GdkCursor *blank_cursor_handle = gdk_cursor_new_for_display(gdk_display_instance, GDK_BLANK_CURSOR);
-    // Grab everything: Pointer, owner_events = FALSE (trap it), use blank cursor, and confine to THIS window
+    
+#ifdef _WIN32
+    /* Windows: Grab pointer without confinement warping.
+     * Relative motion tracking in on_mouse_movements handles deltas. */
     gdk_seat_grab(gdk_seat_instance, gdk_window_handle, GDK_SEAT_CAPABILITY_POINTER, FALSE, blank_cursor_handle, NULL,
                   NULL, NULL);
+#else
+    /* Linux (X11): Grab with confinement to window */
+    gdk_seat_grab(gdk_seat_instance, gdk_window_handle, GDK_SEAT_CAPABILITY_POINTER, FALSE, blank_cursor_handle, NULL,
+                  NULL, NULL);
+#endif
     g_object_unref(blank_cursor_handle);
 }
+
 void mouse_lock_disable(GtkWidget *window_widget) {
     (void) window_widget;
     GdkDisplay *gdk_display_instance = gdk_display_get_default();
@@ -25,7 +35,14 @@ void mouse_lock_disable(GtkWidget *window_widget) {
     GdkSeat *gdk_seat_instance = gdk_display_get_default_seat(gdk_display_instance);
     gdk_seat_ungrab(gdk_seat_instance);
 }
+
 void mouse_lock_reset_centre(GtkWidget *window_widget) {
+#ifdef _WIN32
+    /* Windows: No warp needed - relative tracking handles centering implicitly.
+     * Just reset the centered flag so next motion event establishes baseline. */
+    main_inputs.mouse_centered = false;
+#else
+    /* Linux (X11): Warp cursor to window center */
     GdkWindow *gdk_window_handle = gtk_widget_get_window(window_widget);
     if (!(gdk_window_handle)) {
         return;
@@ -45,7 +62,9 @@ void mouse_lock_reset_centre(GtkWidget *window_widget) {
     gdk_seat_grab(gdk_seat_instance, gdk_window_handle, GDK_SEAT_CAPABILITY_POINTER, FALSE, blank_cursor_handle, NULL,
                   NULL, NULL);
     g_object_unref(blank_cursor_handle);
+#endif
 }
+
 void mouse_lock_reacquire(GtkWidget *window_widget) {
     if (!main_inputs.is_mouse_locked) {
         return;
@@ -61,6 +80,6 @@ void mouse_lock_reacquire(GtkWidget *window_widget) {
                   NULL, NULL);
     g_object_unref(blank_cursor_handle);
     main_inputs.suppress_mouse_delta = false;
-    //Reset warp guard so the first motion event after reacquire is not eaten
+    // Reset warp guard so the first motion event after reacquire is not eaten
     mouse_lock_reset_centre(window_widget);
 }

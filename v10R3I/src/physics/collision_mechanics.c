@@ -970,7 +970,7 @@ void collision_prepare_solver(collision_data *source, collision_data *m, float d
             }
             vector3 floor_up = vector3_scaling(floor_normal, -1.0f);
             
-            /* Project axle onto contact plane (not world horizontal) */
+/* Project axle onto contact plane (not world horizontal) */
             vector3 axle_proj = vector3_subtraction(
                 axle_world,
                 vector3_scaling(floor_up, vector3_dot(axle_world, floor_up))
@@ -986,21 +986,20 @@ void collision_prepare_solver(collision_data *source, collision_data *m, float d
                 float rd_len = vector3_length(rolling_dir);
                 if (rd_len > 0.0001f) rolling_dir = vector3_scaling(rolling_dir, 1.0f / rd_len);
                 vector3 perp = vector3_cross(floor_up, rolling_dir);
-                vector3 grip_dir = vector3_addition(
+                /* roller direction = free-slide axis (along roller, low friction) */
+                vector3 roller_dir = vector3_addition(
                     vector3_scaling(rolling_dir, cos_a),
                     vector3_scaling(perp, sin_a)
                 );
-
-float grip_len = vector3_length(grip_dir);
-                if (grip_len > 0.0001f) {
-                    cp->tangent_vector = vector3_scaling(grip_dir, 1.0f / grip_len);
-                    mecanum_tangent_set = true;
-                    /* MFS_310_ANISO: roller free-slide axis = perpendicular to
-                     * the grip direction in the floor plane (floor_up x grip_dir). */
-                    vector3 free_dir = vector3_cross(floor_up, grip_dir);
-                    float free_len = vector3_length(free_dir);
-                    if (free_len > 0.0001f) {
-                        cp->free_tangent_vector = vector3_scaling(free_dir, 1.0f / free_len);
+                float roller_len = vector3_length(roller_dir);
+                if (roller_len > 0.0001f) {
+                    cp->free_tangent_vector = vector3_scaling(roller_dir, 1.0f / roller_len);
+                    /* grip direction = perpendicular to roller in contact plane (high friction) */
+                    vector3 grip_dir = vector3_cross(floor_up, roller_dir);
+                    float grip_len = vector3_length(grip_dir);
+                    if (grip_len > 0.0001f) {
+                        cp->tangent_vector = vector3_scaling(grip_dir, 1.0f / grip_len);
+                        mecanum_tangent_set = true;
                     }
                 }
             }
@@ -1232,69 +1231,117 @@ void contact_cache_clear(struct physics_world *world) {
 /* MPE_FTC_093: Cylinder vs static floor plane.
  * Models the cylinder as a wheel with a rectangular contact patch.
  * Samples points along the axle (wheel width) to create a stable
- * contact manifold. For tipped wheels, penetration is computed along
- * world-up and contact points are placed on the actual wheel surface
- * (radial offset), not the plane. */
+ * contact manifold. For tipped wheels, the contact normal is the
+ * radial direction from cylinder axis to contact point, and penetration
+ * is measured along that normal. */
 bool collision_static_plane_cylinder(rigidbody *cyl, float plane_y, collision_data *collision_output_data) {
     if (cyl->type != object_cylinder) {return false;}
     vector3 axis = cyl->cached_axes[0];
     float r = cyl->radius;
     float h = cyl->cylinder_half_length;
-    rigidbody *plane_body = collision_static_plane_body_proxy(plane_y);
+rigidbody *plane_body = collision_static_plane_body_proxy(plane_y);
     collision_output_data->object_a = cyl;
     collision_output_data->object_b = plane_body;
-    collision_output_data->normal_vector = (vector3){0.0f, -1.0f, 0.0f};
     collision_output_data->contact_count = 0;
-    const vector3 world_up = {0.0f, 1.0f, 0.0f};
 
-    /* Sample 5 points across the wheel width. Penetration uses vertical
-     * projection of radius, but for tipped wheels radius projects less. */
+    /* Sample 5 points across the wheel width. For each sample, compute the
+     * radial vector from cylinder axis to the floor plane, which gives the
+     * true contact normal and penetration depth for tipped wheels. */
     const int samples = 5;
     for (int s = 0; s < samples; s++) {
         float t = (samples == 1) ? 0.0f : ((float)s / (float)(samples - 1) - 0.5f) * 2.0f;
         vector3 axle_offset = vector3_scaling(axis, t * h);
         vector3 sample_pos = vector3_addition(cyl->position, axle_offset);
-        /* Radial direction is world_up for upright, but for generality use -normal (down) */
-        float vertical_radius = r * fmaxf(0.0f, vector3_dot(world_up, vector3_scaling(collision_output_data->normal_vector, -1.0f)));
-        if (vertical_radius < 0.001f) vertical_radius = r;
-        float lowest_y = sample_pos.y - vertical_radius;
-        float pen = plane_y - lowest_y;
-        if (pen > 0.0f && collision_output_data->contact_count < 4) {
-            contact_point_data *cp = &collision_output_data->contacts[collision_output_data->contact_count];
-            /* Contact point on plane directly below sample */
-            cp->position = (vector3){sample_pos.x, plane_y, sample_pos.z};
-            cp->penetration = pen;
-            collision_output_data->contact_count++;
-        }
-    }
-    if (collision_output_data->contact_count == 0) {
-        vector3 e1 = vector3_subtraction(cyl->position, vector3_scaling(axis, h));
-        vector3 e2 = vector3_addition(cyl->position, vector3_scaling(axis, h));
-        float pen1 = plane_y - (e1.y - r);
-        float pen2 = plane_y - (e2.y - r);
-        if (pen1 > 0.0f && collision_output_data->contact_count < 4) {
-            contact_point_data *cp = &collision_output_data->contacts[collision_output_data->contact_count];
-            cp->position = (vector3){e1.x, plane_y, e1.z};
-            cp->penetration = pen1;
-            collision_output_data->contact_count++;
-        }
-        if (pen2 > 0.0f && collision_output_data->contact_count < 4) {
-            contact_point_data *cp = &collision_output_data->contacts[collision_output_data->contact_count];
-            cp->position = (vector3){e2.x, plane_y, e2.z};
-            cp->penetration = pen2;
-            collision_output_data->contact_count++;
-        }
-        float axle_y_component = fabsf(axis.y);
-        if (axle_y_component < 0.9f) {
-            float barrel_pen = plane_y - (cyl->position.y - r);
-            if (barrel_pen > 0.0f && collision_output_data->contact_count < 4) {
+        
+        /* Vector from sample point straight down to floor */
+        vector3 to_floor = (vector3){0.0f, plane_y - sample_pos.y, 0.0f};
+        
+        /* Project to_floor onto plane perpendicular to cylinder axis.
+         * This gives the radial direction from axis to contact point. */
+        float axis_dot = vector3_dot(to_floor, axis);
+        vector3 radial = vector3_subtraction(to_floor, vector3_scaling(axis, axis_dot));
+        float radial_len = vector3_length(radial);
+        
+        if (radial_len > 0.001f) {
+            /* Normalize radial to get contact normal (points from cylinder to floor) */
+            vector3 contact_normal = vector3_scaling(radial, 1.0f / radial_len);
+            
+            /* Distance from wheel center to floor along contact normal.
+             * Wheel surface is at distance r from center along normal.
+             * Penetration = r - center_to_floor_dist (positive when surface below floor). */
+            float center_to_floor_dist = vector3_dot(contact_normal, radial);
+            float pen = r - center_to_floor_dist;
+            
+            if (pen > 0.0f && collision_output_data->contact_count < 4) {
                 contact_point_data *cp = &collision_output_data->contacts[collision_output_data->contact_count];
-                cp->position = (vector3){cyl->position.x, plane_y, cyl->position.z};
-                cp->penetration = barrel_pen;
+                /* Contact point on cylinder surface (at floor plane) */
+                cp->position = vector3_addition(sample_pos, vector3_scaling(contact_normal, r));
+                cp->penetration = pen;
+                /* Store normal for this contact */
+                collision_output_data->normal_vector = contact_normal;
                 collision_output_data->contact_count++;
             }
         }
     }
+    
+    /* Fallback: check axle endpoints if no contacts found */
+    if (collision_output_data->contact_count == 0) {
+        vector3 e1 = vector3_subtraction(cyl->position, vector3_scaling(axis, h));
+        vector3 e2 = vector3_addition(cyl->position, vector3_scaling(axis, h));
+        
+        for (int ep = 0; ep < 2; ep++) {
+            vector3 end_pos = (ep == 0) ? e1 : e2;
+            vector3 to_floor = (vector3){0.0f, plane_y - end_pos.y, 0.0f};
+            float axis_dot = vector3_dot(to_floor, axis);
+            vector3 radial = vector3_subtraction(to_floor, vector3_scaling(axis, axis_dot));
+            float radial_len = vector3_length(radial);
+            
+            if (radial_len > 0.001f) {
+                vector3 contact_normal = vector3_scaling(radial, 1.0f / radial_len);
+                float center_to_floor_dist = vector3_dot(contact_normal, radial);
+                float pen = r - center_to_floor_dist;
+                if (pen > 0.0f && collision_output_data->contact_count < 4) {
+                    contact_point_data *cp = &collision_output_data->contacts[collision_output_data->contact_count];
+                    cp->position = vector3_addition(end_pos, vector3_scaling(contact_normal, r));
+                    cp->penetration = pen;
+                    collision_output_data->normal_vector = contact_normal;
+                    collision_output_data->contact_count++;
+                }
+            } else {
+                /* Endpoint directly above/below axis - use world up */
+                float pen = r - (end_pos.y - plane_y);
+                if (pen > 0.0f && collision_output_data->contact_count < 4) {
+                    contact_point_data *cp = &collision_output_data->contacts[collision_output_data->contact_count];
+                    cp->position = (vector3){end_pos.x, plane_y, end_pos.z};
+                    cp->penetration = pen;
+                    collision_output_data->normal_vector = (vector3){0.0f, -1.0f, 0.0f};
+                    collision_output_data->contact_count++;
+                }
+            }
+        }
+    }
+    
+    /* Barrel contact for highly tilted wheels (axle nearly vertical) */
+    float axle_y_component = fabsf(axis.y);
+    if (axle_y_component > 0.9f && collision_output_data->contact_count < 4) {
+        vector3 to_floor = (vector3){0.0f, plane_y - cyl->position.y, 0.0f};
+        float axis_dot = vector3_dot(to_floor, axis);
+        vector3 radial = vector3_subtraction(to_floor, vector3_scaling(axis, axis_dot));
+        float radial_len = vector3_length(radial);
+        if (radial_len > 0.001f) {
+            vector3 contact_normal = vector3_scaling(radial, 1.0f / radial_len);
+            float center_to_floor_dist = vector3_dot(contact_normal, radial);
+            float pen = r - center_to_floor_dist;
+            if (pen > 0.0f && collision_output_data->contact_count < 4) {
+                contact_point_data *cp = &collision_output_data->contacts[collision_output_data->contact_count];
+                cp->position = vector3_addition(cyl->position, vector3_scaling(contact_normal, r));
+                cp->penetration = pen;
+                collision_output_data->normal_vector = contact_normal;
+                collision_output_data->contact_count++;
+            }
+        }
+    }
+    
     return collision_output_data->contact_count > 0;
 }
 

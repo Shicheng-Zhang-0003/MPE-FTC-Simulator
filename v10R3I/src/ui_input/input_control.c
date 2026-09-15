@@ -10,6 +10,31 @@
 extern camera main_camera_fov;
 extern input_status main_inputs;
 extern int selected_object;
+
+/* ---- Double-buffered input for frame-perfect latency ---- */
+static input_status input_front;
+static input_status input_back;
+static input_status *input_write = &input_back;
+static input_status *input_read  = &input_front;
+static bool input_initialized = false;
+
+void input_swap_buffers(void) {
+    input_status *tmp = input_write;
+    input_write = input_read;
+    input_read = tmp;
+}
+
+input_status *input_get_read_buffer(void) {
+    return input_read;
+}
+
+void input_init_buffers(void) {
+    if (!input_initialized) {
+        initialize_input(&input_front);
+        initialize_input(&input_back);
+        input_initialized = true;
+    }
+}
 void initialize_input (input_status *input_state) {
     //Keyboard
     input_state -> w_key_pressed = false;
@@ -83,9 +108,17 @@ input_state -> enter_spawn_held = false;
     input_state -> mouse_delta_y = 0.0f;
     input_state -> suppress_mouse_delta = false;
     input_state -> marked_joint_object_index = -1;
+    
+    /* Windows relative mouse tracking state */
+#ifdef _WIN32
+    input_state -> last_mouse_x = 0;
+    input_state -> last_mouse_y = 0;
+    input_state -> mouse_centered = false;
+#endif
 } gboolean on_keypress (GtkWidget *widget, GdkEventKey *event, gpointer user_data_stored) {
     (void) widget;
-    input_status *input_state = (input_status *) user_data_stored;
+    (void) user_data_stored;
+    input_status *input_state = input_write;
     if (event -> keyval == GDK_KEY_w) {input_state -> w_key_pressed = true;}
     if (event -> keyval == GDK_KEY_a) {input_state -> a_key_pressed = true;}
     if (event -> keyval == GDK_KEY_s) {input_state -> s_key_pressed = true;}
@@ -246,7 +279,8 @@ if (event -> keyval == GDK_KEY_space) {input_state -> space_key_pressed = true;}
     return FALSE;
 } gboolean on_key_released (GtkWidget *widget, GdkEventKey *event, gpointer user_data_stored) {
     (void) widget;
-    input_status *input_state = (input_status *) user_data_stored;
+    (void) user_data_stored;
+    input_status *input_state = input_write;
     if (event -> keyval == GDK_KEY_w) {input_state -> w_key_pressed = false;}
     if (event -> keyval == GDK_KEY_a) {input_state -> a_key_pressed = false;}
     if (event -> keyval == GDK_KEY_s) {input_state -> s_key_pressed = false;}
@@ -280,7 +314,40 @@ input_state -> enter_spawn_held = false;
     return FALSE;
 } gboolean on_mouse_movements (GtkWidget *widget, GdkEventMotion *event, gpointer user_data_stored) {
     (void) user_data_stored;
-    input_status *input_state = &main_inputs;
+    input_status *input_state = input_write;
+    
+#ifdef _WIN32
+    /* Windows: Use relative motion tracking (no warp needed)
+     * GDK on Windows provides x/y as widget-relative coordinates.
+     * Track previous position and compute delta directly. */
+    if (input_state -> is_mouse_locked) {
+        int current_x = (int)event->x;
+        int current_y = (int)event->y;
+        
+        if (input_state -> mouse_centered) {
+            int delta_x = current_x - input_state -> last_mouse_x;
+            int delta_y = current_y - input_state -> last_mouse_y;
+            
+            if (delta_x > 80) delta_x = 80;
+            if (delta_x < -80) delta_x = -80;
+            if (delta_y > 80) delta_y = 80;
+            if (delta_y < -80) delta_y = -80;
+            
+            if (delta_x != 0 || delta_y != 0) {
+                input_state -> mouse_delta_x = (float)delta_x;
+                input_state -> mouse_delta_y = -(float)delta_y;
+            }
+        } else {
+            input_state -> mouse_centered = true;
+        }
+        
+        input_state -> last_mouse_x = current_x;
+        input_state -> last_mouse_y = current_y;
+    } else {
+        input_state -> mouse_centered = false;
+    }
+#else
+    /* Linux (X11): Keep existing warp-based approach */
     if (input_state -> is_mouse_locked) {
         static int last_warp_x = -1;
         static int last_warp_y = -1;
@@ -291,7 +358,8 @@ input_state -> enter_spawn_held = false;
             last_warp_x = current_mouse_x;
             last_warp_y = current_mouse_y;
             return FALSE;
-        } int widget_width  = gtk_widget_get_allocated_width  (widget);
+        }
+        int widget_width  = gtk_widget_get_allocated_width  (widget);
         int widget_height = gtk_widget_get_allocated_height (widget);
         int center_x = widget_width / 2;
         int center_y = widget_height / 2;
@@ -312,9 +380,12 @@ input_state -> enter_spawn_held = false;
             last_warp_y = screen_center_y;
             mouse_lock_reset_centre (widget);
         }
-    } return FALSE;
+    }
+#endif
+    return FALSE;
 } gboolean on_button_press (GtkWidget *widget, GdkEventButton *event, gpointer user_data_stored) {
-    input_status *input_state = (input_status *) user_data_stored;
+    (void) user_data_stored;
+    input_status *input_state = input_write;
     if (event -> button == 1) {input_state -> left_mouse_button_clicked = true;}
     if (event -> button == 2) {input_state -> middle_mouse_button_clicked = true;}
     if (event -> button == 3) {input_state -> right_mouse_button_clicked = true;}
@@ -326,7 +397,8 @@ input_state -> enter_spawn_held = false;
     } return FALSE;
 } gboolean on_button_release (GtkWidget *widget, GdkEventButton *event, gpointer user_data_stored) {
     (void) widget;
-    input_status *input_state = (input_status *) user_data_stored;
+    (void) user_data_stored;
+    input_status *input_state = input_write;
     if (event -> button == 1) {input_state -> left_mouse_button_clicked = false;}
     if (event -> button == 2) {input_state -> middle_mouse_button_clicked = false;}
     if (event -> button == 3) {input_state -> right_mouse_button_clicked = false;}
@@ -334,7 +406,8 @@ input_state -> enter_spawn_held = false;
 } gboolean on_focus_out (GtkWidget *widget, GdkEventFocus *event, gpointer user_data_stored) {
     (void) widget;
     (void) event;
-    input_status *input_state = (input_status *) user_data_stored;
+    (void) user_data_stored;
+    input_status *input_state = input_write;
     input_state -> w_key_pressed = false;
     input_state -> a_key_pressed = false;
     input_state -> s_key_pressed = false;
