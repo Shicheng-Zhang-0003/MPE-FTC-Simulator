@@ -114,8 +114,9 @@ void rigidbody_sanitize(rigidbody *rigid_body) {
 
     if (!isfinite(rigid_body->friction_kinetic) || (rigid_body->friction_kinetic < 0.0f)) {
         rigid_body->friction_kinetic = 0.2f;
-rigid_body->driven_this_tick = false; /* MFS_169 */
     }
+    /* MFS: driven_this_tick must always be cleared on sanitize, not only on bad friction */
+    rigid_body->driven_this_tick = false;
 
     if (!isfinite(rigid_body->restitution) || (rigid_body->restitution < 0.0f)) {
         rigid_body->restitution = 0.0f;
@@ -336,13 +337,24 @@ void rb_integrate_velocity(rigidbody *rigid_body, float delta_time, float linear
     /* MFS_ROLLING_FRICTION_FIX: Apply rolling friction torque BEFORE consuming
      * the accumulator. Previously this was after angular_acceleration was computed,
      * so the torque was added to the accumulator then immediately cleared — dead code. */
-    if (rigid_body->roll_friction_coeff > 0.0f && !rigid_body->static_state) {
-        float speed_sq = vector3_length_squared(rigid_body->angular_velocity);
-        if (speed_sq > 0.0f) {
-            vector3 angular_dir = vector3_normalisation(rigid_body->angular_velocity);
-            float roll_torque_mag = rigid_body->roll_friction_coeff * speed_sq;
-            vector3 roll_torque = vector3_scaling(angular_dir, -roll_torque_mag);
-            rigid_body->torque_accumulator = vector3_addition(rigid_body->torque_accumulator, roll_torque);
+    if (rigid_body->roll_friction_coeff > 0.0f && !rigid_body->static_state && rigid_body->type == object_cylinder) {
+        /* Coulomb torque opposing axle spin, gated by actual contact: wheel must be
+         * within 1.1*r of floor (y - r < 0.1*r) to avoid air drag. Height gate alone
+         * fails on ramps; we also require |omega|>0.01 to avoid jitter. */
+        float dist_to_floor = rigid_body->position.y - rigid_body->radius;
+        if (dist_to_floor < rigid_body->radius * 0.15f) {
+            float omega_axle = vector3_dot(rigid_body->angular_velocity, rigid_body->cached_axes[0]);
+            if (fabsf(omega_axle) > 0.01f) {
+                float sign = (omega_axle > 0.0f) ? -1.0f : 1.0f;
+                float n = rigid_body->mass * 9.81f;
+                /* Distribute chassis normal: if wheel is mecanum and has contact, use per-wheel N from total mass
+                 * approximated via 0.02 * N * r gives ~0.02Nm, which alone is too weak to stop idle creep,
+                 * so allow config to tune via roll_friction_coeff. */
+                float torque_mag = rigid_body->roll_friction_coeff * n * rigid_body->radius;
+                if (torque_mag > 0.5f) torque_mag = 0.5f;
+                vector3 roll_torque = vector3_scaling(rigid_body->cached_axes[0], sign * torque_mag);
+                rigid_body->torque_accumulator = vector3_addition(rigid_body->torque_accumulator, roll_torque);
+            }
         }
     }
 

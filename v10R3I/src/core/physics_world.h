@@ -16,6 +16,10 @@ typedef struct {
     vector3 local_position_b;
     float accumulated_normal_impulse;
     float accumulated_tangent_impulse;
+    float accumulated_free_tangent_impulse;
+    vector3 free_tangent_vector;
+    float friction_grip_coeff;
+    float friction_free_coeff;
     uint32_t property_stamp_a;
     uint32_t property_stamp_b;
 } cached_contact;

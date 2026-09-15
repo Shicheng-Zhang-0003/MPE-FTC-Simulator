@@ -111,7 +111,11 @@ static mpe_param s_registry[] = {
 
     {"solver.roller_friction_coeff", "Roller Free-Axis Friction",
      "Mecanum roller free-slide friction coefficient (near 0 = true roller)", p_float, cat_solver,
-     &g_cfg.solver.roller_friction_coeff, 0.2, 0.0, 1.0, true},
+     &g_cfg.solver.roller_friction_coeff, 0.03, 0.0, 1.0, true},
+
+    {"solver.wheel_lock_omega_thresh", "Wheel Lock Omega Thresh",
+     "Omega (rad/s) below which idle mecanum wheels are brake-locked", p_float, cat_solver,
+     &g_cfg.solver.wheel_lock_omega_thresh, 1.5, 0.1, 10.0, true},
 
     /* ============================================================
      * cat_depenetration

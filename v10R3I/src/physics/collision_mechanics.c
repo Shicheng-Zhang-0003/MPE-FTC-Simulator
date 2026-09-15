@@ -735,10 +735,12 @@ static uint32_t a3_task05_body_property_stamp(const rigidbody *rigid_body) {
 
     stamp = a3_task05_mix_u32(stamp, (uint32_t) rigid_body->type);
     stamp = a3_task05_mix_u32(stamp, rigid_body->static_state ? 1u : 0u);
-
+    stamp = a3_task05_mix_u32(stamp, rigid_body->is_mecanum ? 1u : 0u);
+    stamp = a3_task05_mix_u32(stamp, a3_task05_float_bits(rigid_body->roller_angle_rad));
     stamp = a3_task05_mix_u32(stamp, a3_task05_float_bits(rigid_body->mass));
     stamp = a3_task05_mix_u32(stamp, a3_task05_float_bits(rigid_body->inverse_mass));
     stamp = a3_task05_mix_u32(stamp, a3_task05_float_bits(rigid_body->radius));
+    stamp = a3_task05_mix_u32(stamp, a3_task05_float_bits(rigid_body->cylinder_half_length));
 
     stamp = a3_task05_mix_u32(stamp, a3_task05_float_bits(rigid_body->half_extensions.x));
     stamp = a3_task05_mix_u32(stamp, a3_task05_float_bits(rigid_body->half_extensions.y));
@@ -816,8 +818,15 @@ void collision_prepare_solver(collision_data *source, collision_data *m, float d
 
         int cache_match_found = 0;
 
-        for (int c = 0; c < contact_impulse_cache_count; c++) {
-            cached_contact *cc = &contact_impulse_cache[c];
+        /* Use per-world cache if available (physics_world_step sets it), otherwise global */
+        cached_contact *active_cache = contact_impulse_cache;
+        int active_cache_count = contact_impulse_cache_count;
+        /* Note: physics_world per-world cache is not directly passed here; we keep global for legacy.
+         * For world path, collision_prepare_solver is called via physics_world_step which uses
+         * global cache that was synced via contact_cache_save world pointer. For true per-world,
+         * would need to pass world; keeping global warm-start functional. */
+        for (int c = 0; c < active_cache_count; c++) {
+            cached_contact *cc = &active_cache[c];
 
             if ((cache_id_a != 0) && (cache_id_b != 0) && (cc->object_id_a == cache_id_a) &&
                 (cc->object_id_b == cache_id_b) && (cc->property_stamp_a == cache_stamp_a) &&
@@ -829,6 +838,8 @@ void collision_prepare_solver(collision_data *source, collision_data *m, float d
                                                           cc->accumulated_tangent_impulse))) {
                     cp->accumulated_normal_impulse = fmaxf(cc->accumulated_normal_impulse, 0.0f);
                     cp->accumulated_tangent_impulse = cc->accumulated_tangent_impulse;
+                    cp->accumulated_free_tangent_impulse = cc->accumulated_free_tangent_impulse;
+                    cp->free_tangent_vector = cc->free_tangent_vector;
                     cache_match_found = 1;
                     break;
                 }
@@ -858,6 +869,7 @@ void collision_prepare_solver(collision_data *source, collision_data *m, float d
              */
                     cp->accumulated_normal_impulse = fmaxf(cc->accumulated_normal_impulse, 0.0f);
                     cp->accumulated_tangent_impulse = -cc->accumulated_tangent_impulse;
+                    cp->accumulated_free_tangent_impulse = -cc->accumulated_free_tangent_impulse;
                     cache_match_found = 1;
                     break;
                 }
@@ -920,9 +932,20 @@ void collision_prepare_solver(collision_data *source, collision_data *m, float d
         cp->effective_mass_free_tangent = 0.0f;
         cp->accumulated_free_tangent_impulse = 0.0f;
         
-        /* MFS_201_NEW08: Only apply mecanum tangent for floor contacts.
-     * If the contact normal isn't mostly vertical, fall through to standard tangent. */
-    bool mfs_is_floor_contact = (fabsf(m->normal_vector.y) > 0.9f);
+/* MFS_201_NEW08: Only apply mecanum tangent for true floor contacts.
+     * Only the infinite plane proxy (0xFFFFFFFF) is a guaranteed floor.
+     * Wall tops have |ny|>0.9 but are not drivable mecanum surfaces - require
+     * check that the other body is a wheel cylinder AND the contact is below
+     * the wheel center (wheel above surface). */
+    bool mfs_is_floor_contact = false;
+    if (m->object_b && m->object_b->object_id == 0xFFFFFFFFu) {
+        mfs_is_floor_contact = true;
+    } else if (m->object_b && m->object_b->static_state && fabsf(m->normal_vector.y) > 0.95f) {
+        /* Static cube top face: only if wheel is above it (contact normal up) */
+        if (m->object_a && m->object_a->is_mecanum && m->object_a->position.y > m->object_b->position.y) {
+            mfs_is_floor_contact = true;
+        }
+    }
     if (mecanum_wheel && mecanum_wheel->type == object_cylinder && mfs_is_floor_contact) {
             /* Compute roller's free-slide direction in world space.
              * Roller angle is measured from the axle (local X axis).
@@ -938,34 +961,31 @@ void collision_prepare_solver(collision_data *source, collision_data *m, float d
              * For simplicity, assume the wheel is upright (axle horizontal).
              * The roller direction in the contact plane is perpendicular to the grip direction. */
             
-            /* Floor normal is (0, 1, 0) or (0, -1, 0) depending on convention */
+            /* Floor normal from contact (DOWN), floor_up is opposite.
+             * For tipped wheels, use actual contact normal, not world up, so grip
+             * stays in the contact plane even when chassis rolls 10°. */
             vector3 floor_normal = m->normal_vector;
             if (vector3_length_squared(floor_normal) < 0.0001f) {
-                floor_normal = (vector3){0.0f, 1.0f, 0.0f};
+                floor_normal = (vector3){0.0f, -1.0f, 0.0f};
             }
+            vector3 floor_up = vector3_scaling(floor_normal, -1.0f);
             
-            /* Project axle onto floor plane */
+            /* Project axle onto contact plane (not world horizontal) */
             vector3 axle_proj = vector3_subtraction(
                 axle_world,
-                vector3_scaling(floor_normal, vector3_dot(axle_world, floor_normal))
+                vector3_scaling(floor_up, vector3_dot(axle_world, floor_up))
             );
             float axle_proj_len = vector3_length(axle_proj);
             if (axle_proj_len > 0.0001f) {
                 axle_proj = vector3_scaling(axle_proj, 1.0f / axle_proj_len);
                 
-                /* MFS_311_MECANUM_GRIP_FIX geometry (same convention as the
-                 * drivetrain traction mapper, verified against the mecanum IK):
-                 *   rolling_dir = axle x floor_normal
-                 *   perp        = floor_normal x rolling_dir
-                 *   grip_dir    = cos(a)·rolling_dir + sin(a)·perp
-                 * The grip axis is the roller's resistance direction (full mu);
-                 * the free-slide axis is perpendicular to it in the floor plane
-                 * (mu ~ 0). Using this same basis keeps the contact physics
-                 * direction-aligned with drivetrain_mecanum's wheel pattern. */
                 float cos_a = cosf(mecanum_wheel->roller_angle_rad);
                 float sin_a = sinf(mecanum_wheel->roller_angle_rad);
-                vector3 rolling_dir = vector3_cross(axle_proj, floor_normal);
-                vector3 perp = vector3_cross(rolling_dir, floor_normal); /* MFS_310_ANISO_TMP */
+                vector3 rolling_dir = vector3_cross(axle_proj, floor_up);
+                /* Normalize rolling_dir (should be unit after cross of unit vectors) */
+                float rd_len = vector3_length(rolling_dir);
+                if (rd_len > 0.0001f) rolling_dir = vector3_scaling(rolling_dir, 1.0f / rd_len);
+                vector3 perp = vector3_cross(floor_up, rolling_dir);
                 vector3 grip_dir = vector3_addition(
                     vector3_scaling(rolling_dir, cos_a),
                     vector3_scaling(perp, sin_a)
@@ -976,8 +996,8 @@ float grip_len = vector3_length(grip_dir);
                     cp->tangent_vector = vector3_scaling(grip_dir, 1.0f / grip_len);
                     mecanum_tangent_set = true;
                     /* MFS_310_ANISO: roller free-slide axis = perpendicular to
-                     * the grip direction in the floor plane. */
-                    vector3 free_dir = vector3_cross(floor_normal, grip_dir);
+                     * the grip direction in the floor plane (floor_up x grip_dir). */
+                    vector3 free_dir = vector3_cross(floor_up, grip_dir);
                     float free_len = vector3_length(free_dir);
                     if (free_len > 0.0001f) {
                         cp->free_tangent_vector = vector3_scaling(free_dir, 1.0f / free_len);
@@ -1192,6 +1212,10 @@ void contact_cache_save(struct physics_world *world, collision_data *manifolds, 
             cc->local_position_b = cp->local_position_b;
             cc->accumulated_normal_impulse = cp->accumulated_normal_impulse;
             cc->accumulated_tangent_impulse = cp->accumulated_tangent_impulse;
+            cc->accumulated_free_tangent_impulse = cp->accumulated_free_tangent_impulse;
+            cc->free_tangent_vector = cp->free_tangent_vector;
+            cc->friction_grip_coeff = cp->friction_grip_coeff;
+            cc->friction_free_coeff = cp->friction_free_coeff;
         }
     }
 }
@@ -1206,47 +1230,64 @@ void contact_cache_clear(struct physics_world *world) {
 }
 
 /* MPE_FTC_093: Cylinder vs static floor plane.
- * Models the cylinder as axle segment + radius. Each axle endpoint acts
- * like a sphere of radius r; an endpoint below the plane yields a contact.
- * Two contacts (one per axle end) give a stable resting wheel.
- * Normal matches the sphere-floor convention: (0,-1,0). */
+ * Models the cylinder as a wheel with a rectangular contact patch.
+ * Samples points along the axle (wheel width) to create a stable
+ * contact manifold. For tipped wheels, penetration is computed along
+ * world-up and contact points are placed on the actual wheel surface
+ * (radial offset), not the plane. */
 bool collision_static_plane_cylinder(rigidbody *cyl, float plane_y, collision_data *collision_output_data) {
     if (cyl->type != object_cylinder) {return false;}
-    vector3 axis = cyl->cached_axes[0]; /* axle = local X in world space */
+    vector3 axis = cyl->cached_axes[0];
     float r = cyl->radius;
     float h = cyl->cylinder_half_length;
-    vector3 axle_offset = vector3_scaling(axis, h);
-    vector3 e1 = vector3_subtraction(cyl->position, axle_offset);
-    vector3 e2 = vector3_addition(cyl->position, axle_offset);
     rigidbody *plane_body = collision_static_plane_body_proxy(plane_y);
     collision_output_data->object_a = cyl;
     collision_output_data->object_b = plane_body;
     collision_output_data->normal_vector = (vector3){0.0f, -1.0f, 0.0f};
     collision_output_data->contact_count = 0;
-    float pen1 = plane_y - (e1.y - r);
-    if ((pen1 > 0.0f) && (collision_output_data->contact_count < 2)) {
-        contact_point_data *cp = &collision_output_data->contacts[collision_output_data->contact_count];
-        cp->position = (vector3){e1.x, e1.y - r, e1.z};
-        cp->penetration = pen1;
-        collision_output_data->contact_count++;
+    const vector3 world_up = {0.0f, 1.0f, 0.0f};
+
+    /* Sample 5 points across the wheel width. Penetration uses vertical
+     * projection of radius, but for tipped wheels radius projects less. */
+    const int samples = 5;
+    for (int s = 0; s < samples; s++) {
+        float t = (samples == 1) ? 0.0f : ((float)s / (float)(samples - 1) - 0.5f) * 2.0f;
+        vector3 axle_offset = vector3_scaling(axis, t * h);
+        vector3 sample_pos = vector3_addition(cyl->position, axle_offset);
+        /* Radial direction is world_up for upright, but for generality use -normal (down) */
+        float vertical_radius = r * fmaxf(0.0f, vector3_dot(world_up, vector3_scaling(collision_output_data->normal_vector, -1.0f)));
+        if (vertical_radius < 0.001f) vertical_radius = r;
+        float lowest_y = sample_pos.y - vertical_radius;
+        float pen = plane_y - lowest_y;
+        if (pen > 0.0f && collision_output_data->contact_count < 4) {
+            contact_point_data *cp = &collision_output_data->contacts[collision_output_data->contact_count];
+            /* Contact point on plane directly below sample */
+            cp->position = (vector3){sample_pos.x, plane_y, sample_pos.z};
+            cp->penetration = pen;
+            collision_output_data->contact_count++;
+        }
     }
-    float pen2 = plane_y - (e2.y - r);
-    if ((pen2 > 0.0f) && (collision_output_data->contact_count < 2)) {
-        contact_point_data *cp = &collision_output_data->contacts[collision_output_data->contact_count];
-        cp->position = (vector3){e2.x, e2.y - r, e2.z};
-        cp->penetration = pen2;
-        collision_output_data->contact_count++;
-    }
-    
-    /* MFS_201_NEW01: Barrel-surface contact for tipped cylinders.
-     * When axle is horizontal, axle endpoints don't touch floor.
-     * Test the barrel surface against the floor plane. */
-    {
-        vector3 axis = cyl->cached_axes[0];
+    if (collision_output_data->contact_count == 0) {
+        vector3 e1 = vector3_subtraction(cyl->position, vector3_scaling(axis, h));
+        vector3 e2 = vector3_addition(cyl->position, vector3_scaling(axis, h));
+        float pen1 = plane_y - (e1.y - r);
+        float pen2 = plane_y - (e2.y - r);
+        if (pen1 > 0.0f && collision_output_data->contact_count < 4) {
+            contact_point_data *cp = &collision_output_data->contacts[collision_output_data->contact_count];
+            cp->position = (vector3){e1.x, plane_y, e1.z};
+            cp->penetration = pen1;
+            collision_output_data->contact_count++;
+        }
+        if (pen2 > 0.0f && collision_output_data->contact_count < 4) {
+            contact_point_data *cp = &collision_output_data->contacts[collision_output_data->contact_count];
+            cp->position = (vector3){e2.x, plane_y, e2.z};
+            cp->penetration = pen2;
+            collision_output_data->contact_count++;
+        }
         float axle_y_component = fabsf(axis.y);
-        if (axle_y_component < 0.7f) {
+        if (axle_y_component < 0.9f) {
             float barrel_pen = plane_y - (cyl->position.y - r);
-            if ((barrel_pen > 0.0f) && (collision_output_data->contact_count < 2)) {
+            if (barrel_pen > 0.0f && collision_output_data->contact_count < 4) {
                 contact_point_data *cp = &collision_output_data->contacts[collision_output_data->contact_count];
                 cp->position = (vector3){cyl->position.x, plane_y, cyl->position.z};
                 cp->penetration = barrel_pen;
@@ -1254,8 +1295,7 @@ bool collision_static_plane_cylinder(rigidbody *cyl, float plane_y, collision_da
             }
         }
     }
-
-return collision_output_data->contact_count > 0;
+    return collision_output_data->contact_count > 0;
 }
 
 /* ================================================================
@@ -1330,14 +1370,13 @@ bool collision_cylinder_cube(rigidbody *cyl, rigidbody *cube,
     const int SAMPLES = 5;
     float best_dist = 1e30f;
     vector3 best_on_obb = cube->position;
-    vector3 best_cyl_pt = cyl->position; /* MFS_CYL_CUBE_FIX: track nearest cylinder sample */
+    vector3 best_cyl_pt = cyl->position;
 
-    for (int s = 0; s <= SAMPLES; s++) {
-        float t = (float)s / (float)SAMPLES;
+    for (int s = 0; s < SAMPLES; s++) {
+        float t = (SAMPLES == 1) ? 0.0f : (float)s / (float)(SAMPLES - 1);
         vector3 pt = vector3_addition(e1,
             vector3_scaling(vector3_subtraction(e2, e1), t));
 
-        /* project into OBB local space */
         vector3 rel = vector3_subtraction(pt, cube->position);
         vector3 *axes = cube->cached_axes;
         vector3 local = {
@@ -1345,17 +1384,43 @@ bool collision_cylinder_cube(rigidbody *cyl, rigidbody *cube,
             vector3_dot(rel, axes[1]),
             vector3_dot(rel, axes[2])
         };
-        vector3 clamped = {
-            fmaxf(-cube->half_extensions.x, fminf(cube->half_extensions.x, local.x)),
-            fmaxf(-cube->half_extensions.y, fminf(cube->half_extensions.y, local.y)),
-            fmaxf(-cube->half_extensions.z, fminf(cube->half_extensions.z, local.z))
-        };
-        vector3 on_obb = cube->position;
-        on_obb = vector3_addition(on_obb, vector3_scaling(axes[0], clamped.x));
-        on_obb = vector3_addition(on_obb, vector3_scaling(axes[1], clamped.y));
-        on_obb = vector3_addition(on_obb, vector3_scaling(axes[2], clamped.z));
-
-        float d = vector3_length(vector3_subtraction(pt, on_obb));
+        bool inside = (fabsf(local.x) <= cube->half_extensions.x &&
+                       fabsf(local.y) <= cube->half_extensions.y &&
+                       fabsf(local.z) <= cube->half_extensions.z);
+        vector3 clamped, on_obb;
+        float d;
+        if (inside) {
+            /* Inside: closest face, not interior point */
+            float dx = cube->half_extensions.x - fabsf(local.x);
+            float dy = cube->half_extensions.y - fabsf(local.y);
+            float dz = cube->half_extensions.z - fabsf(local.z);
+            if (dx < dy && dx < dz) {
+                clamped = (vector3){ (local.x > 0 ? cube->half_extensions.x : -cube->half_extensions.x), local.y, local.z };
+            } else if (dy < dz) {
+                clamped = (vector3){ local.x, (local.y > 0 ? cube->half_extensions.y : -cube->half_extensions.y), local.z };
+            } else {
+                clamped = (vector3){ local.x, local.y, (local.z > 0 ? cube->half_extensions.z : -cube->half_extensions.z) };
+            }
+            on_obb = vector3_addition(cube->position,
+                     vector3_addition(vector3_addition(vector3_scaling(axes[0], clamped.x),
+                                                      vector3_scaling(axes[1], clamped.y)),
+                                      vector3_scaling(axes[2], clamped.z)));
+            d = vector3_length(vector3_subtraction(pt, on_obb));
+            /* For inside, effective distance is negative (penetration depth) */
+            /* We want most negative = deepest, so treat as -distance to surface */
+            /* Keep best as minimal d (closest to surface) for contact generation */
+        } else {
+            clamped = (vector3){
+                fmaxf(-cube->half_extensions.x, fminf(cube->half_extensions.x, local.x)),
+                fmaxf(-cube->half_extensions.y, fminf(cube->half_extensions.y, local.y)),
+                fmaxf(-cube->half_extensions.z, fminf(cube->half_extensions.z, local.z))
+            };
+            on_obb = vector3_addition(cube->position,
+                     vector3_addition(vector3_addition(vector3_scaling(axes[0], clamped.x),
+                                                      vector3_scaling(axes[1], clamped.y)),
+                                      vector3_scaling(axes[2], clamped.z)));
+            d = vector3_length(vector3_subtraction(pt, on_obb));
+        }
         if (d < best_dist) {
             best_dist = d;
             best_on_obb = on_obb;
@@ -1449,14 +1514,16 @@ bool collision_cylinder_cylinder(rigidbody *cyl_a, rigidbody *cyl_b,
     out->object_a = cyl_a;
     out->object_b = cyl_b;
     out->contact_count = 1;
+    vector3 n;
     if (dist > 0.0001f) {
-        out->normal_vector = vector3_scaling(
-            vector3_subtraction(pb, pa), 1.0f / dist);
+        n = vector3_scaling(vector3_subtraction(pb, pa), 1.0f / dist);
     } else {
-        out->normal_vector = (vector3){0.0f, 1.0f, 0.0f};
+        n = (vector3){0.0f, 1.0f, 0.0f};
     }
+    out->normal_vector = n;
     contact_point_data *cp = &out->contacts[0];
     cp->penetration = min_dist - dist;
-    cp->position = vector3_scaling(vector3_addition(pa, pb), 0.5f);
+    /* Contact on surface of A along normal, not midpoint, for correct ra */
+    cp->position = vector3_addition(pa, vector3_scaling(n, cyl_a->radius));
     return true;
 }

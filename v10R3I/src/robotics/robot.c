@@ -59,24 +59,25 @@ return 1;
     };
     robot->wheel_count = 4;
 
-    for (int i = 0; i < robot->wheel_count; i++) {
-        /* Create wheel as a sphere (rolling approximation) */
-        robot->wheel_bodies[i] =
-            physics_world_add_cylinder(world, WHEEL_RADIUS, WHEEL_HALF_WIDTH, WHEEL_MASS,
+    int chassis_body_snapshot = robot->chassis_body;
+    int wheel_count_snapshot = 0;
+    for (int i = 0; i < 4; i++) {
+        /* Create wheel as cylinder (axle along X) */
+        int added = physics_world_add_cylinder(world, WHEEL_RADIUS, WHEEL_HALF_WIDTH, WHEEL_MASS,
                                      (vector3){wheel_positions[i][0], wheel_positions[i][1], wheel_positions[i][2]});
-        if (robot->wheel_bodies[i] < 0) {
-/* MFS_302C_ROLLBACK: Mark already-created bodies as dead. */
-if (robot->chassis_body >= 0)
-rigidbody_set_static(&world->bodies[robot->chassis_body], true);
+        if (added < 0) {
+/* MFS_302C_ROLLBACK: Properly rollback body_count and constraints instead of leaking ghosts. */
+int saved_count = chassis_body_snapshot >=0 ? chassis_body_snapshot : 0;
+world->body_count = saved_count;
 for (int rb_i = 0; rb_i < i; rb_i++) {
-if (robot->wheel_bodies[rb_i] >= 0)
-rigidbody_set_static(&world->bodies[robot->wheel_bodies[rb_i]], true);
 if (robot->wheel_joints[rb_i] >= 0)
 constraint_remove(robot->wheel_joints[rb_i]);
 }
 memset(robot, 0, sizeof(ftc_robot));
 return 1;
         }
+        robot->wheel_bodies[i] = added;
+        wheel_count_snapshot++;
 
         uint32_t wheel_id = world->bodies[robot->wheel_bodies[i]].object_id;
 
@@ -88,12 +89,10 @@ return 1;
         robot->wheel_joints[i] =
             constraint_add_revolute(chassis_id, wheel_id, anchor_on_chassis, anchor_on_wheel, axle_axis);
         if (robot->wheel_joints[i] < 0) {
-/* MFS_302C_ROLLBACK: Mark already-created bodies as dead. */
-if (robot->chassis_body >= 0)
-rigidbody_set_static(&world->bodies[robot->chassis_body], true);
+/* MFS_302C_ROLLBACK: Rollback body_count and remove constraints. */
+int saved_count = chassis_body_snapshot >=0 ? chassis_body_snapshot : 0;
+world->body_count = saved_count;
 for (int rb_i = 0; rb_i <= i; rb_i++) {
-if (robot->wheel_bodies[rb_i] >= 0)
-rigidbody_set_static(&world->bodies[robot->wheel_bodies[rb_i]], true);
 if (robot->wheel_joints[rb_i] >= 0)
 constraint_remove(robot->wheel_joints[rb_i]);
 }
@@ -104,10 +103,10 @@ return 1;
         /* MFS_MECANUM_REAL: Mark wheel as mecanum with roller angle.
          * Standard layout: front-left +45°, front-right -45°, back-left -45°, back-right +45° */
         float roller_angle = 0.0f;
-        if (i == 0) roller_angle = 0.785398f;       /* front-left: +45° */
-        if (i == 1) roller_angle = -0.785398f;      /* front-right: -45° */
-        if (i == 2) roller_angle = -0.785398f;      /* back-left: -45° */
-        if (i == 3) roller_angle = 0.785398f;       /* back-right: +45° */
+        if (i == 0) roller_angle = 0.78539816339f;       /* front-left: +45° */
+        if (i == 1) roller_angle = -0.78539816339f;      /* front-right: -45° */
+        if (i == 2) roller_angle = -0.78539816339f;      /* back-left: -45° */
+        if (i == 3) roller_angle = 0.78539816339f;       /* back-right: +45° */
         
         if (robot->drivetrain_type == FTC_DRIVETRAIN_MECANUM) {
                 rigidbody_set_mecanum(&world->bodies[robot->wheel_bodies[i]], true, roller_angle);
@@ -126,9 +125,10 @@ return 1;
          * the wheel BODY itself (wheel roll + rotor·G² + one wheel's share of
          * chassis load), so motor torque ramps the wheel up like a real geared
          * drivetrain and the back-EMF brake coasts it down without the discrete
-         * light-wheel reversal pogo. The contact solver then also reacts to a
-         * physically-realistic wheel moment instead of the bare 2.5e-4. */
-        if (robot->drivetrain_type == FTC_DRIVETRAIN_MECANUM) {
+         * light-wheel reversal pogo. Apply to ALL drivetrain types (tank and mecanum)
+         * to keep effective inertia symmetric. Only the X axle component is enlarged;
+         * Y/Z keep the geometric cylinder inertia for correct tilt dynamics. */
+        {
             rigidbody *wb = &world->bodies[robot->wheel_bodies[i]];
             float i_axle_eff = robot->wheel_motors[i].effective_inertia;
             if (i_axle_eff > 0.0f) {
@@ -175,30 +175,9 @@ void ftc_robot_update(physics_world *world, ftc_robot *robot, float dt) {
         }
         float wheel_speed = vector3_dot(wheel->angular_velocity, axle);
 
-        /* MFS_310_OVERSPEED_CAP: a driven wheel can never exceed its DC-motor
-         * free speed under its own power (back-EMF guarantees it). The discrete
-         * light-wheel transient (near-zero reflected inertia before the back-EMF
-         * builds) can briefly read ~30% over free otherwise -> stress-test
-         * over-spin. Clamp the axle spin to the motor's free speed. */
-        {
-            float cap = robot->wheel_motors[i].free_speed_rad_s;
-            if (cap > 0.1f) {
-                if (wheel_speed > cap) {
-                    wheel->angular_velocity = vector3_subtraction(
-                        wheel->angular_velocity, vector3_scaling(axle, wheel_speed - cap));
-                    wheel_speed = cap;
-                } else if (wheel_speed < -cap) {
-                    wheel->angular_velocity = vector3_subtraction(
-                        wheel->angular_velocity, vector3_scaling(axle, wheel_speed + cap));
-                    wheel_speed = -cap;
-                }
-            }
-        }
-
         /* MFS_314_DRIVE_RAMP: apply the recorded target_command through the
          * per-second ramp so stick snaps become smooth acceleration instead of
-         * instant full-voltage (which over-runs the wheel past its contact
-         * grip and shows up as rpm overshoot on the stress test). */
+         * instant full-voltage. */
         {
             motor *pm = &robot->wheel_motors[i];
             float dcmd = pm->command_ramp_per_s * dt;
@@ -213,32 +192,10 @@ void ftc_robot_update(physics_world *world, ftc_robot *robot, float dt) {
 
         /* Apply motor torque along the actual physical axle in world space */
         float torque = robot->wheel_motors[i].output_torque;
-        /* MFS_145_IDLE_BRAKE: back-EMF braking is a damper — it brings a coasting
-         * wheel to rest and can never reverse it (no back-EMF once stopped).
-         * At idle, clamp the braking torque to the amount that stops the wheel
-         * within this timestep. Without this, the stall-clamped back-EMF torque
-         * (~2.17 N·m) reverses the light wheel every step -> ±25 rad/s idle spin. */
-        if ((fabsf(robot->wheel_motors[i].command) < 0.05f) && ((torque * wheel_speed) < 0.0f)) {
-            /* MFS_310_IDLE_BRAKE_FIX: clamp the back-EMF brake to the amount
-             * that stops the wheel within this timestep using the REFLECTED
-             * driveline inertia (wheel + rotor·G² + chassis share). The old
-             * clamp used the bare wheel inertia, making the brake nearly
-             * zero and letting the wheel free-coast — which true roller
-             * physics (near-free roller axis) turns into endless idle spin. */
-            float mfs_i_axle = robot->wheel_motors[i].effective_inertia;
-            if (mfs_i_axle <= 0.0f) {
-                mfs_i_axle = 0.5f * wheel->mass * wheel->radius * wheel->radius;
-            }
-            if (mfs_i_axle > 0.0f) {
-                float mfs_max_brake = mfs_i_axle * fabsf(wheel_speed) / dt;
-                if (fabsf(torque) > mfs_max_brake) {
-                    torque = (torque > 0.0f) ? mfs_max_brake : -mfs_max_brake;
-                }
-            }
-        }
         wheel->torque_accumulator = vector3_addition(
             wheel->torque_accumulator,
             vector3_scaling(axle, torque));
+        wheel->driven_this_tick = true; /* MFS_169: mark as driven so wheel lock doesn't activate */
         rigidbody_wake(wheel); /* MPE_FTC_078: keep driven wheels awake so motor torque is applied */
     }
 }

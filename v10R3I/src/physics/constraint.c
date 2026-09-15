@@ -55,7 +55,9 @@ void constraint_set_revolute_motor (int index, bool enabled, float target_speed,
 }
 
 static rigidbody *find_body_by_id (rigidbody *bodies, int body_count, uint32_t id) {
-    if (!bodies) { return NULL; }
+    if (!bodies || id==0) { return NULL; }
+    /* Fast path: object_id are sequential from 1, but with walls offset; linear scan is fine for <16k bodies.
+     * Could hash by id%capacity, but keep linear for correctness. */
     for (int i = 0; i < body_count; i++) {
         if (bodies [i].object_id == id) { return &bodies [i]; }
     }
