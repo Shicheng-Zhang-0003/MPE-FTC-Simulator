@@ -1,0 +1,4146 @@
+Yes. I went considerably deeper this time.
+
+I traced the MFS-specific changes through the robot construction, motor model, drivetrain, contact solver, revolute constraints, world lifecycle, GUI bridge, odometry, battery, and the MFS diagnostics/tests. I also checked the actual current goBILDA specs where the code claims to model real hardware.
+
+**There are several things here that are substantially worse than the problems already solved by the original MPE.** A few are serious enough that I would not trust the current robot model for autonomous/drive characterization.
+
+The most important discovery is one I did **not** call out before:
+
+> **The wheel cylinders physically overlap the chassis by 10 mm, and there is no collision filtering between a wheel and the chassis it is revolutely attached to.**
+
+That is a P0-level problem.
+
+---
+
+# 🔴 P0 — Fix these before tuning anything
+
+## 1. The wheels are literally inside the chassis
+
+Current dimensions:
+
+```c
+CHASSIS_HALF_Y = 0.075
+WHEEL_RADIUS   = 0.05
+WHEEL_Y_OFFSET = -0.075 - 0.05 + 0.01
+               = -0.115
+```
+
+At rest:
+
+```text
+chassis center Y = 0.165
+chassis bottom   = 0.165 - 0.075 = 0.090
+
+wheel center     = 0.165 - 0.115 = 0.050
+wheel top        = 0.050 + 0.050 = 0.100
+```
+
+So:
+
+```text
+             chassis
+        ┌───────────────┐
+ y=.100 ├────wheel──────┤  ← wheel top
+        │               │
+ y=.090 ├───────────────┤  ← chassis bottom
+        │               │
+ y=.050 │ wheel center  │
+```
+
+**There is 10 mm of geometric penetration.**
+
+And the wheels are also:
+
+```text
+x = ±0.24
+chassis edge = ±0.225
+```
+
+with a wheel half-width of 0.02, so the wheel extends 5 mm into the chassis in X as well.
+
+The robot therefore begins life with four cylinders overlapping their parent chassis.
+
+And I found **no collision filtering whatsoever for jointed bodies**.
+
+The physics world explicitly does:
+
+```c
+collision_cylinder_cube(wheel, chassis, ...)
+```
+
+and then separately:
+
+```c
+constraint_solve_all(...)
+```
+
+So the solver is simultaneously being told:
+
+> "Wheel must remain attached to this point."
+
+and
+
+> "Wheel must be pushed out of the chassis."
+
+That's exactly the kind of hidden force loop that produces:
+
+* vertical jitter
+* wheel chatter
+* weird chassis pitch/roll
+* excessive solver work
+* traction changing depending on solver iterations
+* strange behavior when turning
+* unexplained energy injection
+
+### Fix
+
+Either:
+
+**A. Give the wheel actual clearance**
+
+For example, make the wheel center at least:
+
+```text
+chassis_bottom - wheel_radius
+```
+
+so:
+
+```c
+WHEEL_Y_OFFSET <= -0.125f
+```
+
+with a little extra clearance, perhaps `-0.1275f` or similar.
+
+**OR**, preferably:
+
+**B. Add collision filtering between the chassis and its four wheel bodies.**
+
+That is the physically correct solution for a constrained wheel assembly.
+
+I would do **both**: correct the geometry and explicitly prevent self-collision between the robot's connected bodies.
+
+---
+
+# 🔴 2. MFS's "driveline inertia" double-counts the chassis
+
+This is probably the second-biggest physics problem.
+
+MFS calculates:
+
+```c
+wheel inertia
++ rotor inertia * G²
++ chassis mass / 4 * r²
+```
+
+For the default 30:1 motor:
+
+```text
+wheel inertia:
+0.5 × 0.2 × 0.05²
+= 0.00025 kg·m²
+
+reflected rotor:
+2e-7 × 30²
+= 0.00018 kg·m²
+
+reflected chassis:
+2.2 × 0.05²
+= 0.00550 kg·m²
+
+total:
+≈ 0.00593 kg·m²
+```
+
+The physical wheel itself is only:
+
+```text
+0.00025 kg·m²
+```
+
+So MFS makes the wheel body about:
+
+**23.7× more rotationally inertial than its actual wheel inertia.**
+
+But here's the subtle part:
+
+### The `m × r²` load is already represented by the chassis rigidbody.
+
+The solver already has:
+
+```text
+wheel
+    ↓ contact impulse
+ground
+    ↓
+chassis mass = 8 kg
+```
+
+The chassis has its own translational inertia.
+
+So when MFS additionally writes:
+
+```c
+wb->inertia_tensor_local.matrix[0][0] = i_axle_eff;
+```
+
+it has effectively added the chassis's translational inertia to the wheel **while retaining the chassis's original mass**.
+
+That's double counting.
+
+For four equal wheels under pure forward motion, the correct generalized inertia is approximately:
+
+```text
+4 × (wheel inertia + reflected rotor inertia)
++ chassis_mass × r²
+```
+
+MFS instead gives the wheel bodies the reflected chassis load **and then still has the chassis mass present**.
+
+For the default 30:1 robot, the total effective forward inertia becomes roughly **1.93× too large**.
+
+So you're effectively making the robot almost twice as inertial as intended.
+
+### This is why I don't want this "fixed" by changing the 0.0055 number.
+
+The concept is wrong.
+
+The proper solution is:
+
+```text
+physical wheel body:
+    real wheel inertia
+
+motor:
+    reflected rotor inertia
+
+physics constraints/contact:
+    naturally provide chassis load
+```
+
+Don't bake chassis translational inertia into the wheel's rigidbody inertia.
+
+---
+
+# 🔴 3. The MFS wheel-lock system is actually dead
+
+You added:
+
+```c
+if (rb->is_mecanum && !rb->driven_this_tick)
+```
+
+to implement the MFS wheel-lock.
+
+But in `ftc_robot_update()`:
+
+```c
+wheel->driven_this_tick = true;
+```
+
+is executed **unconditionally** for every valid wheel.
+
+That happens even when:
+
+```c
+command == 0
+```
+
+because the motor still gets updated at zero command.
+
+Therefore:
+
+```text
+driven_this_tick = true
+```
+
+for an idle wheel.
+
+Then:
+
+```c
+!rb->driven_this_tick
+```
+
+is false.
+
+So:
+
+> **MFS_150_WHEEL_LOCK never runs for normal robot wheels.**
+
+It is effectively dead code.
+
+And this matters because the codebase has subsequently removed the older explicit idle-brake clamp.
+
+So the current idle behavior is **not actually the behavior MFS_150 was intended to produce**.
+
+---
+
+# 🔴 4. Even if wheel-lock were alive, it violates momentum conservation
+
+This code runs **after** the entire contact/constraint solver:
+
+```c
+rb->angular_velocity =
+    rb->angular_velocity + axle * delta_omega;
+```
+
+That's a direct velocity edit.
+
+There is no equal-and-opposite impulse applied to:
+
+* the chassis
+* the ground
+* the revolute joint
+
+So the wheel can simply lose angular momentum after the solver has finished.
+
+Imagine:
+
+```text
+robot moving
+wheel spinning
+↓
+solver finishes
+↓
+MFS wheel lock edits wheel ω
+↓
+wheel suddenly stops spinning
+↓
+chassis still has its old velocity
+```
+
+Next frame the contact solver has to clean up the inconsistency.
+
+That's an artificial source/sink of momentum.
+
+If wheel braking is desired, it belongs as a **torque/impulse inside the dynamics**, not as a post-solver velocity mutation.
+
+---
+
+# 🔴 5. The motor constants are not trustworthy enough to call this a real motor model
+
+The preset table says:
+
+```c
+19.2:1  -> 1.63 Nm, 340 RPM, 17 A
+30:1    -> 2.55 Nm, 220 RPM, 17 A
+43.7:1  -> 3.72 Nm, 150 RPM, 17 A
+71:1    -> 6.04 Nm, 92 RPM, 17 A
+```
+
+The code itself admits:
+
+> "representative values"
+
+rather than actually tying them to the current hardware.
+
+And the current official [goBILDA 19.2:1 5203 specification](https://www.gobilda.com/5203-series-yellow-jacket-planetary-gear-motor-19-2-1-ratio-24mm-length-8mm-rex-shaft-312-rpm-3-3-5v-encoder/?utm_source=chatgpt.com) says:
+
+```text
+19.2:1
+312 RPM
+9.2 A stall
+24.3 kg·cm stall torque
+```
+
+24.3 kg·cm is approximately **2.38 Nm**, versus the code's **1.63 Nm**.
+
+So the default 19.2:1 preset is:
+
+* ~32% too low in stall torque
+* ~9% too high in free speed
+* ~85% too high in stall current
+
+And the current official 71.2:1 unit is:
+
+```text
+84 RPM
+9.2 A stall
+93.6 kg·cm ≈ 9.18 Nm
+```
+
+rather than:
+
+```text
+92 RPM
+17 A
+6.04 Nm
+```
+
+([goBILDA][1])
+
+That's not a small calibration error.
+
+The current presets are **not reliable hardware models**.
+
+---
+
+# 🔴 6. The battery model is fundamentally the wrong battery
+
+The code says:
+
+```c
+nominal_voltage = 12.8
+capacity_ah = 3.5
+internal_resistance = 0.015
+```
+
+and explicitly calls it a LiPo.
+
+But the current goBILDA FTC battery is a:
+
+```text
+12 V
+3000 mAh
+NiMH
+20 A fuse
+30 A maximum discharge, limited to 20 A by fuse
+```
+
+([goBILDA][2])
+
+So MFS is currently modelling:
+
+> **a battery that isn't the battery it claims to simulate.**
+
+This gets considerably worse.
+
+---
+
+# 🔴 7. Four motors can draw 68 A in the simulator
+
+The default motor preset says:
+
+```c
+stall_current = 17 A
+```
+
+Therefore:
+
+```text
+4 × 17 A = 68 A
+```
+
+The battery model happily accepts that.
+
+The real goBILDA 12 V battery has a **20 A fuse**. ([goBILDA][2])
+
+So the simulator currently allows:
+
+```text
+68 A
+↓
+battery still alive
+↓
+terminal voltage ≈ 11.78 V
+↓
+four motors continue producing enormous torque
+```
+
+instead of something resembling:
+
+```text
+current limiting / voltage collapse / fuse limitation
+```
+
+There is **no total-current limit**.
+
+There is **no motor-controller current limit**.
+
+There is **no fuse behavior**.
+
+There is **no battery protection behavior**.
+
+This makes low-speed multi-motor acceleration and stall behavior seriously suspect.
+
+---
+
+# 🔴 8. The motor efficiency is mathematically cancelled out
+
+This is subtle but definite.
+
+You calculate:
+
+```c
+kt = stall_torque /
+     (stall_current * gear_ratio * efficiency);
+```
+
+then:
+
+```c
+torque = kt * current * efficiency;
+```
+
+and:
+
+```c
+output_torque = torque * gear_ratio;
+```
+
+The efficiency therefore cancels.
+
+At stall:
+
+```text
+(stall_torque / (I × G × η))
+× I × η × G
+
+= stall_torque
+```
+
+So:
+
+```c
+efficiency = 0.85
+```
+
+and:
+
+```c
+efficiency = 0.80
+```
+
+do not actually reduce mechanical output torque.
+
+The code's comment claims MFS_318 is reconciling the energy discrepancy with additional losses.
+
+**It doesn't.**
+
+There is no actual `τ_friction` term in `motor_update()`.
+
+So the model has:
+
+```text
+electrical power
+≠
+mechanical power
++ copper loss
++ modelled mechanical loss
+```
+
+by a large amount.
+
+For example, at the default 30:1 motor's midpoint, the model can have roughly:
+
+```text
+electrical power ≈ 109 W
+copper loss     ≈ 54 W
+mechanical      ≈ 15 W
+```
+
+leaving about **40 W unexplained**.
+
+That isn't necessarily catastrophic for driving, but it means the motor/battery/thermal model cannot be considered energetically accurate.
+
+---
+
+# 🟠 9. The drive ramp is in the wrong layer
+
+MFS_314 uses:
+
+```c
+command_ramp_per_s = 8.0f;
+```
+
+Therefore:
+
+```text
+0 → 1 = 125 ms
++1 → -1 = 250 ms
+```
+
+That's a controller/input shaping behavior.
+
+But it has been put **inside the motor model**.
+
+That means:
+
+```text
+autonomous command:
+    set motor power = 1
+```
+
+doesn't mean:
+
+```text
+motor power = 1
+```
+
+for 125 ms.
+
+This makes the physical motor model depend on the UI/control smoothing policy.
+
+For human teleop, "buttery" may be desirable.
+
+For:
+
+* autonomous
+* PID testing
+* trajectory following
+* motor characterization
+* closed-loop control
+
+it's poison.
+
+The motor should receive the actual commanded voltage/power.
+
+A teleop layer can optionally transform:
+
+```text
+stick → shaped command → motor
+```
+
+but the motor model itself should not do that.
+
+---
+
+# 🟠 10. Zero-power behavior is hardcoded as aggressive braking
+
+At:
+
+```c
+command = 0
+```
+
+the motor does not coast.
+
+Back EMF produces:
+
+```text
+negative current
+→ negative torque
+→ active electrical braking
+```
+
+and then MFS adds:
+
+```text
+gearbox drag
++
+rolling resistance
+```
+
+So zero power is effectively:
+
+> **BRAKE**
+
+There is no:
+
+```text
+FLOAT / COAST
+BRAKE
+```
+
+choice.
+
+For an FTC simulator that's a significant behavioral omission.
+
+---
+
+# 🟠 11. The gearbox drag is completely arbitrary
+
+MFS added:
+
+```c
+base_drag = 0.004 Nm
+```
+
+then:
+
+```c
+drag = base_drag × gear_ratio × efficiency
+```
+
+clamped to:
+
+```c
+0.02 Nm minimum
+0.15 Nm maximum
+```
+
+So the 71:1 motor gets slammed into the:
+
+```c
+0.15 Nm
+```
+
+ceiling.
+
+This is not derived from a gearbox specification.
+
+It is a hand-tuned brake.
+
+It can therefore dominate low-speed behavior, especially when combined with:
+
+* back EMF
+* rolling resistance
+* the wrong effective inertia
+* the dead wheel-lock system
+
+This is one of the constants I'd remove entirely until it is backed by measured data.
+
+---
+
+# 🟠 12. Rolling resistance is applied even when the wheel isn't touching the floor
+
+`drivetrain_update()` calculates:
+
+```c
+f_rr = c_rr * n_per_wheel
+```
+
+and applies the torque whenever the wheel has nonzero angular velocity.
+
+It doesn't check whether that wheel has a floor contact.
+
+So if a wheel becomes airborne:
+
+```text
+wheel airborne
+↓
+still gets "ground" rolling resistance
+```
+
+That's physically wrong.
+
+And it gets a second rolling-resistance contribution from the rigidbody system's:
+
+```c
+roll_friction_coeff = 0.01
+```
+
+So there are actually **two rolling-resistance models** acting on the wheel.
+
+---
+
+# 🟠 13. `9.81` is hardcoded in drivetrain physics
+
+This is a real MFS bug:
+
+```c
+float gravity_mag = 9.81f;
+if (g_cfg.world.gravity < 0.0f)
+    gravity_mag = -g_cfg.world.gravity;
+```
+
+If gravity is:
+
+```text
+-9.81 → 9.81
+-5.0  → 5.0
+```
+
+but if someone sets:
+
+```text
++5.0
+```
+
+you get:
+
+```text
+9.81
+```
+
+and more importantly, the code conceptually should just use:
+
+```c
+fabsf(g_cfg.world.gravity)
+```
+
+The drivetrain's:
+
+* normal load
+* rolling resistance
+* brake torque
+
+should all respond to the actual configured gravity.
+
+---
+
+# 🟠 14. The MFS robot is using ground-truth odometry
+
+This is one of the most misleading pieces of the current system.
+
+You track wheel radians:
+
+```c
+robot->wheel_radians += omega * dt;
+```
+
+but then your actual pose estimate is:
+
+```c
+odom_x += chassis_vel.x * dt;
+odom_z += chassis_vel.z * dt;
+odom_theta += yaw_rate * dt;
+```
+
+That's not wheel odometry.
+
+That's:
+
+> **perfect simulator ground-truth velocity integration.**
+
+A real robot does not know `chassis_vel`.
+
+This makes the simulator look much more accurate than a real robot whenever there is:
+
+* wheel slip
+* mecanum scrub
+* collision
+* wheel lift
+* battery sag
+* inaccurate wheel radius
+* roller slip
+
+So any autonomous algorithm tested against this odometry will get a falsely optimistic result.
+
+And there's another bug:
+
+### You integrate the velocity before physics has produced the new velocity.
+
+`drivetrain_update()` happens:
+
+```text
+motor
+↓
+odometry
+↓
+physics_world_step()
+```
+
+So odometry uses the **pre-step chassis velocity**.
+
+That's a one-tick temporal lag.
+
+---
+
+# 🟠 15. The wheel/chassis self-collision is made worse by the cylinder-cube approximation
+
+Even after fixing the 10 mm geometry overlap, MFS's cylinder-vs-cube collision is an approximation:
+
+```text
+5 samples along cylinder axis
++
+sphere-vs-OBB style contact
+```
+
+The code itself acknowledges:
+
+```text
+contacts between samples can be missed
+```
+
+This is particularly problematic for wheels against:
+
+* field walls
+* chassis geometry
+* obstacles
+
+because the cylinder has flat endcaps but the approximation effectively treats sampled centerline points as spheres.
+
+And the contact point is:
+
+```c
+cp->position = best_on_obb;
+```
+
+rather than a properly resolved midpoint/surface contact.
+
+That gives the solver a potentially incorrect lever arm for torque.
+
+For a wheel hitting a wall, that can produce wrong yaw/roll impulses.
+
+---
+
+# 🟠 16. MFS's anisotropic friction is not actually a proper friction cone
+
+You have two independent friction constraints:
+
+```text
+grip axis
+free/roller axis
+```
+
+and each independently gets:
+
+```text
+|impulse| <= μN
+```
+
+That means the combined friction vector can exceed the ordinary Coulomb limit.
+
+Mathematically the allowed region is effectively a rectangle:
+
+```text
+       free
+        ↑
+        │ ┌─────────┐
+        │ │         │
+        │ │         │
+        └─┼─────────→ grip
+```
+
+rather than a friction ellipse/cone.
+
+With:
+
+```c
+μgrip = 0.8
+μfree = 0.03
+```
+
+the numerical error is small.
+
+But if you ever tune:
+
+```c
+roller_friction_coeff
+```
+
+upward, this becomes increasingly wrong.
+
+A proper anisotropic friction model should use an ellipse or equivalent combined constraint.
+
+---
+
+# 🟠 17. The free-axis warm start is broken
+
+MFS stores:
+
+```c
+accumulated_free_tangent_impulse
+```
+
+but when warm-starting the contact it initially applies:
+
+```c
+normal impulse
++
+grip tangent impulse
+```
+
+The free-axis impulse isn't included in the initial warm-start velocity correction.
+
+So the cache can remember:
+
+```text
+free tangent impulse = X
+```
+
+without actually having applied that impulse to the bodies.
+
+Then the next iteration treats that value as accumulated history.
+
+That's internally inconsistent.
+
+And because the world-specific cache isn't actually being read anyway, this is mostly latent — but it's still broken.
+
+---
+
+# 🔴 18. Worse: the robot's contact cache is contaminated by the MPE world
+
+This one is **very nasty**.
+
+The legacy MPE physics loop ends with:
+
+```c
+contact_cache_save(NULL, active_manifold, manifold_count);
+```
+
+which writes to the **global** cache.
+
+Then the MFS robot world runs.
+
+`collision_prepare_solver()` reads:
+
+```c
+contact_impulse_cache
+```
+
+the global cache.
+
+But the robot world does:
+
+```c
+contact_cache_save(world, ...)
+```
+
+which saves into:
+
+```c
+world->world_contact_cache
+```
+
+not the global cache.
+
+So the actual flow is:
+
+```text
+MPE world
+    ↓
+global contact cache
+
+MFS robot world
+    ↓
+reads global MPE cache
+    ↓
+solves robot
+
+MFS robot world
+    ↓
+writes its own cache
+    ↓
+which it doesn't read next time
+```
+
+So the robot's warm start isn't actually persistent.
+
+Worse, the MPE cache can contain object IDs that overlap with the robot world's object IDs.
+
+Both worlds begin numbering bodies from 1.
+
+That means the robot can potentially find a cache entry that belongs to an entirely different object in the legacy world if the IDs and property stamps line up.
+
+**This is exactly the kind of thing that causes intermittent contact jitter that looks like "physics instability."**
+
+The solution is simple architecturally:
+
+> `collision_prepare_solver()` needs the world cache passed into it, rather than consulting a process-global cache.
+
+---
+
+# 🔴 19. `constraint_pool_init()` is global, but MFS worlds are supposed to be independent
+
+`physics_world_init()` does:
+
+```c
+constraint_pool_init();
+```
+
+That resets the global constraint pool.
+
+So:
+
+```text
+world A
+  robot A
+    4 wheel constraints
+
+world B initialized
+
+constraint_pool_init()
+    ↓
+global constraint pool reset
+```
+
+Robot A's joint handles are now potentially invalid.
+
+This completely undermines multi-world isolation.
+
+It also means that the seemingly innocent:
+
+```c
+physics_world_init()
+```
+
+has a global side effect on every other robot.
+
+This should be fixed before multiple robots/worlds are trusted.
+
+---
+
+# 🟠 20. The revolute axis correction violates angular momentum
+
+MFS changed the axis-drift correction to:
+
+```c
+/* only correct wheel */
+body_b->angular_velocity += ...
+```
+
+instead of correcting both bodies.
+
+I understand **why** you did it: correcting the 8 kg chassis to fix a 0.2 kg wheel causes ugly chassis wobble.
+
+But physically:
+
+```text
+constraint correction torque on wheel
+```
+
+requires an equal/opposite response somewhere.
+
+MFS simply moves the wheel's angular velocity.
+
+So this is numerically stable at the cost of physical correctness.
+
+For a perfectly flat robot, it may be harmless.
+
+For:
+
+* wheel lift
+* collisions
+* ramps
+* wall impacts
+* tilted chassis
+
+it can inject/remove angular momentum.
+
+I'd replace this with a proper constraint impulse using the relative orientation error and both inverse inertias, rather than hard-pinning the chassis and teleporting angular velocity.
+
+---
+
+# 🟠 21. The fixed 60 Hz robot simulation is visually quantized
+
+The robot world runs:
+
+```c
+fixed_robot_dt = 1.0f / 60.0f;
+```
+
+which is fine for deterministic physics.
+
+But after each group of 60 Hz steps, the GUI proxies are simply snapped to the latest physics state.
+
+There is **no render interpolation**.
+
+So on a:
+
+```text
+120 Hz display
+144 Hz display
+165 Hz display
+240 Hz display
+```
+
+you get:
+
+```text
+physics pose:
+A A B B C C D D ...
+```
+
+instead of interpolated motion.
+
+That's visible as robot jitter even if the underlying physics is perfectly stable.
+
+Given the display problems you just described, this is absolutely relevant.
+
+The correct architecture is:
+
+```text
+physics state N
+physics state N+1
+       ↓
+render interpolation alpha
+       ↓
+smooth visual pose
+```
+
+Do not increase physics frequency merely to hide this.
+
+---
+
+# 🟠 22. The default robot is spawned OUTSIDE the field
+
+Both the debug terminal and keyboard spawn use:
+
+```c
+gui_robot_spawn(5.0f,
+                ftc_robot_rest_height(),
+                5.0f,
+                MOTOR_GB_5203_30);
+```
+
+But the field is:
+
+```text
+12 ft × 12 ft
+half width = 1.8288 m
+```
+
+So:
+
+```text
+x = 5 m
+z = 5 m
+```
+
+is **far outside the field**.
+
+The robot then gets inserted into a world whose walls are at ±1.8288m.
+
+That's a completely broken spawn condition.
+
+The first physics frames are effectively:
+
+```text
+robot outside field
+↓
+walls
+↓
+hard chassis clamp
+↓
+wheel constraints
+↓
+wall collisions
+↓
+contact solver
+```
+
+This can produce an apparent "robot physics problem" immediately after spawning.
+
+This should be changed to something like:
+
+```text
+(0, rest_height, 0)
+```
+
+or a safe point well inside the field.
+
+---
+
+# 🟠 23. The field-boundary clamp is another artificial physics layer
+
+After the solver:
+
+```c
+position.x = lim_x;
+velocity.x = 0;
+```
+
+etc.
+
+That's a teleport/clamp.
+
+So near a wall you effectively have:
+
+```text
+wall collision
++
+contact solver
++
+post-step positional teleport
+```
+
+Those are three different mechanisms enforcing the same boundary.
+
+And MFS deliberately skips mecanum wheels from this clamp:
+
+```c
+!world->bodies[i].is_mecanum
+```
+
+So:
+
+```text
+chassis gets clamped
+wheels don't
+```
+
+while the revolute constraints keep them together.
+
+This is precisely the kind of thing that produces weird wall behavior.
+
+A real collision system should let the wall impulse do the job.
+
+---
+
+# 🟠 24. The wheel load used for rolling resistance is permanently 1/4 of total mass
+
+MFS assumes:
+
+```c
+n_per_wheel =
+    total_mass * gravity / wheel_count;
+```
+
+That's fine for a stationary perfectly level robot.
+
+But during:
+
+* acceleration
+* braking
+* rotation
+* collision
+* climbing
+* tipping
+
+normal loads are not equal.
+
+And because this is used to generate a torque:
+
+```c
+torque_rr = μrr × N × r
+```
+
+the rolling resistance changes incorrectly with robot dynamics.
+
+The actual contact normal impulse already exists in the solver.
+
+Eventually rolling resistance should be derived from the actual contact normal force.
+
+---
+
+# 🟠 25. The default 0.02 rolling-resistance coefficient is applied on top of `roll_friction_coeff = 0.01`
+
+The rigidbody cylinder has:
+
+```c
+roll_friction_coeff = 0.01
+```
+
+Then MFS drivetrain adds:
+
+```c
+rolling_resistance_coeff = 0.02
+```
+
+So the wheel isn't governed by one rolling resistance model.
+
+It's:
+
+```text
+rigidbody rolling friction
++
+MFS drivetrain rolling resistance
+```
+
+The second one dominates, but this still makes the resulting coefficient difficult to reason about or calibrate.
+
+Pick one model.
+
+---
+
+# 🟠 26. The current motor model has no no-load current
+
+Official goBILDA 5203 data gives a no-load current around:
+
+```text
+0.25 A
+```
+
+for the 19.2:1 motor. ([goBILDA][3])
+
+The MFS motor model reaches:
+
+```text
+current = 0
+```
+
+at exactly free speed.
+
+That means the simulated motor has:
+
+* zero electrical losses at no-load
+* zero torque at no-load
+* no bearing/brush/gearbox drag except the separate hand-tuned drivetrain drag
+
+That makes the free-running/coasting behavior wrong.
+
+---
+
+# 🟠 27. Thermal modelling is telemetry, not protection
+
+The motor temperature can reach:
+
+```c
+150°C
+```
+
+but nothing actually changes.
+
+There is no:
+
+```text
+thermal derating
+controller shutdown
+resistance increase
+torque reduction
+```
+
+So:
+
+```text
+stall motor
+→ heat
+→ 150°C
+→ stays at full torque forever
+```
+
+That's not a usable thermal model.
+
+---
+
+# 🟡 28. The actual mecanum hardware isn't represented geometrically
+
+Current goBILDA mecanum wheels are actual roller assemblies; for example the 104 mm GripForce wheel uses **11 individual rollers**, ball-bearing supported, and is 40A silicone. ([goBILDA][4])
+
+MFS instead models:
+
+```text
+cylinder
++
+two anisotropic friction directions
+```
+
+That's a reasonable *engine approximation*, and I actually prefer it to the old fake chassis-force approach.
+
+But it means you cannot claim:
+
+> "we simulate the mecanum wheel"
+
+in every physical sense.
+
+You simulate:
+
+> **a continuous anisotropic contact patch approximating a mecanum wheel.**
+
+That's fine.
+
+Just don't tune it as though it were an exact roller model.
+
+---
+
+# 🟡 29. Wheel radius is currently a generic 100 mm
+
+```c
+WHEEL_RADIUS = 0.05
+```
+
+Current common goBILDA FTC mecanum hardware includes 96 mm wheels and 104 mm wheels. ([goBILDA][5])
+
+That's a:
+
+```text
+96 mm → 100 mm = +4.17%
+104 mm → 100 mm = -3.85%
+```
+
+error.
+
+That directly changes:
+
+* linear speed
+* wheel encoder conversion
+* torque-to-force conversion
+* odometry
+* acceleration
+
+For a generic robot that's acceptable.
+
+For a "real goBILDA motor + mecanum" preset, it should be parameterized.
+
+---
+
+# 🟡 30. MFS's 19.2:1 preset is particularly internally inconsistent
+
+The code says:
+
+```text
+340 RPM
+1.63 Nm
+17 A
+```
+
+while the current official 19.2:1 motor is:
+
+```text
+312 RPM
+2.38 Nm
+9.2 A
+```
+
+([goBILDA][3])
+
+That means the simulated motor has roughly:
+
+```text
+speed:  +9%
+torque: -32%
+```
+
+which is exactly the opposite of what you'd want if you're trying to model the actual motor.
+
+The current 2026–27 goBILDA starter kit itself uses the 19.2:1 312 RPM motor. ([goBILDA][6])
+
+---
+
+# 🟡 31. The current battery capacity is wrong even independently of chemistry
+
+Code:
+
+```c
+3.5 Ah
+```
+
+Current goBILDA:
+
+```text
+3.0 Ah
+```
+
+([goBILDA][7])
+
+That's a 16.7% capacity difference.
+
+But the more serious problem is the discharge model:
+
+```c
+avg_current = total_current * 0.25
+```
+
+This is basically a hand-tuned "make the battery last longer" coefficient.
+
+It is not a battery model.
+
+---
+
+# 🟡 32. Empty battery still gives you 9 V
+
+This:
+
+```c
+if (terminal < 9.0f)
+    terminal = 9.0f;
+```
+
+means:
+
+```text
+battery = 0%
+motor = still gets 9V
+```
+
+That's not a battery reaching empty.
+
+It's a hard-coded minimum motor voltage.
+
+This can hide battery failures during autonomous testing.
+
+---
+
+# 🟡 33. Battery sag uses stale motor currents
+
+The order is:
+
+```text
+read previous motor currents
+↓
+calculate battery voltage
+↓
+drain battery
+↓
+update motors
+```
+
+So the battery voltage for tick N is based on motor current from tick N−1.
+
+At 60 Hz this isn't catastrophic, but under rapid direction/command changes it introduces a one-tick electrical lag.
+
+---
+
+# 🟡 34. MFS has no current controller / voltage-controller model
+
+The motor gets:
+
+```c
+battery_voltage * command
+```
+
+directly.
+
+There is no model of:
+
+* motor controller current limit
+* PWM switching
+* voltage droop under controller current limit
+* controller update rate
+* deadband
+* braking mode
+
+So the motor is essentially an ideal voltage source controlled by a scalar.
+
+That's okay for a first-order model.
+
+It's not enough for serious FTC electrical characterization.
+
+---
+
+# 🟠 35. `ftc_robot_set_wheel_commands()` can leave stale motors
+
+If somebody calls:
+
+```c
+ftc_robot_set_wheel_commands(robot, commands, 2);
+```
+
+on a 4-wheel robot:
+
+```text
+wheel 0 = new
+wheel 1 = new
+wheel 2 = OLD
+wheel 3 = OLD
+```
+
+There is no clearing of the remaining wheels.
+
+That can create extremely confusing partial-drive bugs.
+
+The API should either:
+
+* require exactly `wheel_count`, or
+* explicitly zero unspecified motors.
+
+---
+
+# 🟠 36. Mecanum drive hardcodes four wheels
+
+```c
+float wheel_targets[4];
+...
+ftc_robot_set_wheel_commands(robot, wheel_targets, 4);
+```
+
+while the robot abstraction supports:
+
+```c
+FTC_MAX_WHEELS = 8
+```
+
+So the drivetrain abstraction isn't actually generic.
+
+This won't hurt the current four-wheel robot, but it is a structural trap.
+
+---
+
+# 🟡 37. The MFS diagnostics are testing against some questionable assumptions
+
+For example, the stress test explicitly expects:
+
+```text
+RPM < 260
+```
+
+based on:
+
+```text
+free RPM = 220
+```
+
+But the underlying motor presets themselves aren't trustworthy.
+
+So the validation system can prove:
+
+> "the simulator behaves like the simulator's constants"
+
+without proving:
+
+> "the simulator behaves like the real robot."
+
+That's an important distinction.
+
+---
+
+# 🟠 38. The release gate literally claims something the motor code doesn't actually do
+
+`RELEASE_GATES.md` says:
+
+> Motor model: BackEMF, gear ratio, Kt/Kv correct
+
+But the implementation deliberately makes:
+
+```text
+Kt != Ke
+```
+
+and does not implement the friction-loss model its comments claim.
+
+So I would remove that checkmark.
+
+The honest wording would be something like:
+
+> "Motor model reproduces configured stall torque and free speed using an empirical split Kt/Ke model."
+
+That is defensible.
+
+"Kt/Kv correct" isn't.
+
+---
+
+# 🟠 39. The "headless" tests aren't actually headless
+
+I tried to compile the MFS robot tests directly while stripping the GTK flags.
+
+The build still fails because core physics files include:
+
+```c
+#include "../mpe_engine.h"
+```
+
+which unconditionally includes:
+
+```c
+#include <gtk/gtk.h>
+#include <epoxy/gl.h>
+```
+
+So the supposed headless physics test suite still has a GUI dependency.
+
+That matters because it means the testing architecture isn't actually isolating:
+
+```text
+physics
+```
+
+from:
+
+```text
+GTK
+```
+
+and this is exactly why I couldn't execute the physics tests in the current environment despite removing GTK from the compiler flags.
+
+---
+
+# The hierarchy I'd use
+
+After going through all of this, I would classify the current MFS robot like this:
+
+## 🔴 P0 — robot can be physically wrong
+
+1. **Wheel/chassis 10 mm interpenetration**
+2. **No wheel↔chassis collision filtering**
+3. **Reflected chassis inertia double-counted**
+4. **MFS wheel-lock dead because `driven_this_tick` is unconditional**
+5. **Post-solver wheel velocity brake violates dynamics**
+6. **Global MPE/MFS contact-cache contamination**
+7. **Global constraint pool reset across worlds**
+8. **Default spawn at `(5, 5)` outside a ±1.8288 m field**
+9. **Motor/battery hardware model is substantially wrong**
+10. **68 A simulated battery draw despite a 20 A fuse**
+
+Those are the ones I'd stop the project for.
+
+---
+
+## 🟠 P1 — materially inaccurate driving
+
+11. Ground-truth odometry
+12. Odometry updated before physics step
+13. Fixed 8/s motor command ramp
+14. Hardcoded brake behavior
+15. Arbitrary gearbox drag `0.004 / 0.02 / 0.15 Nm`
+16. Rolling resistance duplicated
+17. Rolling resistance applied to airborne wheels
+18. Normal load always `M g / 4`
+19. Hard field clamp after physics
+20. Wheel skipped from field clamp
+21. Cylinder/cube contact approximation
+22. Single contact normal for multiple tipped-wheel contacts
+23. Revolute axis correction only modifies wheel
+24. No motor current limiting
+25. No thermal derating
+26. Battery floor at 9 V
+27. Battery chemistry/curve incorrect
+28. No-load motor current absent
+
+---
+
+## 🟡 P2 — model fidelity / future work
+
+29. Continuous anisotropic contact instead of actual rollers
+30. Rectangular rather than elliptical anisotropic friction cone
+31. Free-axis warm-start inconsistency
+32. 96/104 mm wheel vs 100 mm generic wheel
+33. No roller inertia
+34. No wheel compliance
+35. No motor gearbox backlash
+36. No controller dynamics
+37. No encoder quantization
+38. No brake/coast configuration
+39. No actual sensor model
+40. 60 Hz render snapping without interpolation
+41. Four-wheel drivetrain hardcoding
+42. Partial command API leaves stale wheels
+
+---
+
+# And there's an important conclusion here
+
+The **original MPE really has solved more of the actual physics foundation than MFS currently deserves credit for.**
+
+The MFS changes are not uniformly improvements.
+
+The good MFS idea is:
+
+```text
+motor torque
+    ↓
+wheel rigidbody
+    ↓
+real contact
+    ↓
+anisotropic mecanum friction
+    ↓
+chassis
+```
+
+**Keep that.**
+
+That is fundamentally better than the old:
+
+```text
+mecanum command
+    ↓
+fake chassis force
+```
+
+The bad MFS pattern is:
+
+```text
+physics problem
+    ↓
+add another correction constant
+    ↓
+another post-solver correction
+    ↓
+another brake
+    ↓
+another inertia term
+    ↓
+another clamp
+```
+
+That's where this code has started going off the rails.
+
+The clearest example is the drivetrain:
+
+```text
+real motor torque
++ reflected chassis inertia
++ back-EMF brake
++ gearbox drag
++ rolling resistance #1
++ rolling resistance #2
++ wheel lock
++ post-solver wheel correction
++ hard field clamp
+```
+
+That's **too many overlapping mechanisms trying to stabilize one physical system**.
+
+And some of them are now fighting one another.
+
+---
+
+# If I were fixing this exact tree
+
+I would **not** start by tuning `0.03`, `0.08`, `0.004`, `8.0`, `0.02`, etc.
+
+I'd do this in this order:
+
+### Phase 1 — restore physical correctness
+
+```text
+1. Remove wheel↔chassis collision
+2. Fix wheel/chassis geometry
+3. Remove chassis mass from wheel rigidbody inertia
+4. Delete post-solver wheel-lock velocity editing
+5. Delete/disable gearbox drag temporarily
+6. Delete duplicate rolling resistance
+7. Make zero-power behavior explicitly configurable
+```
+
+Then verify the bare physical system.
+
+### Phase 2 — make the solver trustworthy
+
+```text
+8. Per-world contact cache
+9. Per-world constraint pool
+10. Proper jointed-body collision filtering
+11. Correct cylinder/cube contact geometry
+12. Proper two-axis friction constraint
+13. Proper joint stabilization
+```
+
+### Phase 3 — make the hardware model real
+
+Use actual measured/spec values for the selected motor.
+
+For example, if modelling the current goBILDA 19.2:1, start from its actual:
+
+```text
+312 RPM
+9.2 A stall
+24.3 kg·cm stall
+12 V
+```
+
+rather than the current `340 / 17 / 1.63`. ([goBILDA][3])
+
+And model the actual battery as:
+
+```text
+12 V NiMH
+3.0 Ah
+20 A fuse
+```
+
+rather than an invented 12.8 V / 3.5 Ah LiPo. ([goBILDA][2])
+
+### Phase 4 — only then tune
+
+Then I'd tune:
+
+```text
+μ_grip
+μ_roller
+C_rr
+gearbox losses
+motor thermal constants
+battery internal resistance
+controller current limit
+```
+
+using actual measurements.
+
+### Phase 5 — autonomous truth
+
+Finally:
+
+```text
+wheel encoder odometry
+IMU
+wheel slip
+sensor noise
+quantization
+latency
+```
+
+and **keep the perfect physics pose separate from the simulated sensor pose**.
+
+---
+
+## Bottom line
+
+I would currently rate the MFS robot physics as:
+
+**Conceptually: ~8/10**
+
+**Actual physical correctness of the current implementation: ~5/10**
+
+And the gap is almost entirely because of the MFS "stabilization" layer.
+
+The original MPE's actual rigidbody/contact machinery is giving you a solid foundation. **The MFS drivetrain should be simplified back toward that foundation, not made more complicated.**
+
+The four findings I'd attack **immediately** are:
+
+> **1. 10 mm wheel/chassis interpenetration + missing self-collision filtering**
+> **2. reflected chassis inertia double-counting**
+> **3. global contact-cache contamination**
+> **4. incorrect motor/battery constants and 68 A unrestricted current model**
+
+Those four alone can produce a robot that feels *completely different* from the physical system even if every one of the existing MFS tests says PASS.
+
+And that's the red-team result I would trust much more than the current release checklist.
+
+[1]: https://www.gobilda.com/5203-series-yellow-jacket-planetary-gear-motor-71-2-1-ratio-24mm-length-8mm-rex-shaft-84-rpm-3-3-5v-encoder/?utm_source=chatgpt.com "5203 Series Yellow Jacket Planetary Gear Motor (71.2:1 Ratio, 24mm Length 8mm REX® Shaft, 84 RPM, 3.3 - 5V Encoder) - goBILDA®"
+[2]: https://www.gobilda.com/content/user_manuals/3100-0012-0020_user-manual.pdf?utm_source=chatgpt.com "3100-0012-0020 User Manual"
+[3]: https://www.gobilda.com/5203-series-yellow-jacket-planetary-gear-motor-19-2-1-ratio-24mm-length-8mm-rex-shaft-312-rpm-3-3-5v-encoder/?utm_source=chatgpt.com "5203 Series Yellow Jacket Planetary Gear Motor (19.2:1 Ratio, 24mm Length 8mm REX® Shaft, 312 RPM, 3.3 - 5V Encoder) - goBILDA®"
+[4]: https://www.gobilda.com/gripforce-mecanum-wheel-set-o104mm-40a-durometer-rollers/?utm_source=chatgpt.com "GripForce™ Mecanum Wheel Set (Ø104mm, 40A Durometer Rollers) - goBILDA®"
+[5]: https://www.gobilda.com/96mm-mecanum-wheel-set-70a-durometer-bearing-supported-rollers/?utm_source=chatgpt.com "96mm Mecanum Wheel Set (70A Durometer Bearing Supported Rollers) - goBILDA®"
+[6]: https://www.gobilda.com/ftc-starter-kit-2026-2027-season/?utm_source=chatgpt.com "FTC Starter Kit (2026-2027 Season)"
+[7]: https://www.gobilda.com/12v-nimh-nested-battery-3000mah-mh-fc-xt30-connector/?utm_source=chatgpt.com "12V NiMH Nested Battery (3000mAh, MH-FC XT30 Connector) - goBILDA®"
+
+
+
+Oh, **this is the one where I stopped treating the GUI as "some GTK stuff that happens to be broken" and treated it as an adversarial system.**
+
+I went through the current display/input path, the render path, the GTK widget hierarchy, frame scheduling, mouse grab logic, camera, overlay, menus, terminal/dialog focus, and the recent Git history.
+
+And I have a much more complete diagnosis now.
+
+The short version:
+
+> **The display system is suffering from one catastrophic architectural regression that then cascades into several secondary bugs.**
+>
+> The regression is the input double-buffering, but the display loop itself also has timing/synchronization problems that independently guarantee visible jitter.
+
+And I found some things that are considerably nastier than the IJKL symptom.
+
+---
+
+# ☠️ THE CENTRAL MONSTER
+
+The current system has:
+
+```text
+GTK events
+      ↓
+input_write
+      ↓
+swap
+      ↓
+input_read
+      ↓
+copy
+      ↓
+main_inputs
+      ↓
+camera / dispatch / physics
+```
+
+The intent is presumably:
+
+> Events happen asynchronously → collect them in one buffer → swap at frame boundary → consume a stable snapshot.
+
+**But the implementation doesn't preserve state across buffers.**
+
+You have:
+
+```c
+static input_status input_front;
+static input_status input_back;
+
+static input_status *input_write = &input_back;
+static input_status *input_read  = &input_front;
+```
+
+and:
+
+```c
+void input_swap_buffers(void) {
+    input_status *tmp = input_write;
+    input_write = input_read;
+    input_read = tmp;
+}
+```
+
+The fatal assumption is that after swapping, the buffer becoming the writer automatically contains the current state.
+
+It doesn't.
+
+It contains **whatever state it had the last time it was read**.
+
+---
+
+# ☠️ Held keys become a square wave
+
+Suppose:
+
+```text
+front.W = false
+back.W  = false
+```
+
+Press W:
+
+```text
+back.W = true
+```
+
+Frame 1:
+
+```text
+swap
+
+read  = back → W=true
+write = front
+```
+
+`main_inputs.W` becomes true.
+
+Frame 2:
+
+```text
+swap
+
+read  = front → W=false
+write = back
+```
+
+`main_inputs.W` becomes false.
+
+Frame 3:
+
+```text
+swap
+
+read = back → W=true
+```
+
+Frame 4:
+
+```text
+read = front → W=false
+```
+
+Therefore:
+
+# **W = TRUE, FALSE, TRUE, FALSE, TRUE, FALSE...**
+
+Same for:
+
+* W
+* A
+* S
+* D
+* I
+* J
+* K
+* L
+* Space
+* Shift
+* essentially every persistent input
+
+This is not a timing edge case.
+
+**It is deterministic.**
+
+So your description:
+
+> "the ijkl motions don't hold up"
+
+is exactly what the source predicts.
+
+---
+
+# ☠️ And this is why keys activate after you've released them
+
+Now release W.
+
+The release event only modifies whichever buffer happens to be `input_write`.
+
+The other buffer may still contain:
+
+```text
+W = true
+```
+
+So the old state can come back on the next swap.
+
+You therefore get:
+
+```text
+press
+  ↓
+true
+
+release
+  ↓
+false
+
+old buffer comes around
+  ↓
+TRUE AGAIN
+```
+
+Hence:
+
+> "WASD or IJKL triggers movements even when I am not really pressing anything"
+
+This isn't keyboard ghosting.
+
+It's **software resurrecting stale input state.**
+
+---
+
+# ☠️ One-shot buttons are also broken
+
+This is even worse because the same architecture is being used for things that are supposed to be one-shot events.
+
+Take:
+
+```c
+menu_1_pressed = true;
+```
+
+The simulation does:
+
+```c
+main_inputs.menu_1_pressed = false;
+```
+
+But that's only changing the **copy**:
+
+```text
+input_read
+     ↓
+main_inputs
+```
+
+It does **not** clear:
+
+```text
+input_read.menu_1_pressed
+```
+
+So the original event can return when that buffer rotates back into the read position.
+
+Result:
+
+```text
+press 1
+
+frame N:
+    menu_1 = true
+    action executes
+
+frame N+1:
+    other buffer
+    false
+
+frame N+2:
+    original buffer
+    TRUE AGAIN
+```
+
+So you have a general class of:
+
+# **Every-other-frame event resurrection**
+
+This can affect:
+
+* menu actions
+* F
+* R
+* Delete
+* M
+* T
+* F5–F11
+* Enter
+* mouse buttons
+* debug-terminal activation
+* mode toggles
+* spawn actions
+
+That means the UI isn't merely "occasionally responding twice."
+
+**Its event lifetime semantics are fundamentally broken.**
+
+---
+
+# ☠️ Mouse locking is effectively self-contradictory
+
+This one is beautiful in the worst possible way.
+
+Click:
+
+```c
+input_state->is_mouse_locked = true;
+```
+
+But `input_state` is:
+
+```c
+input_write
+```
+
+So after the click:
+
+```text
+write = true
+read  = false
+```
+
+Then swap:
+
+```text
+read  = true
+write = false
+```
+
+The simulation thinks:
+
+```text
+mouse locked = true
+```
+
+but the next mouse event goes to:
+
+```text
+input_write
+```
+
+which says:
+
+```text
+mouse locked = false
+```
+
+So the mouse handler immediately stops treating motion as locked.
+
+Then the next swap reverses it.
+
+You have effectively created:
+
+```text
+logical mouse lock:
+
+TRUE
+FALSE
+TRUE
+FALSE
+```
+
+while the actual GTK seat grab remains independently grabbed.
+
+That is **an absolutely cursed split-brain state machine.**
+
+It explains why mouse behavior can appear completely dead, intermittently alive, or dependent on exactly when you move the mouse relative to the frame callback.
+
+---
+
+# ☠️ Mouse deltas are explicitly murdered before use
+
+This one remains devastating:
+
+```c
+main_inputs = *read_buf;
+
+main_inputs.mouse_delta_x = 0.0f;
+main_inputs.mouse_delta_y = 0.0f;
+```
+
+Then:
+
+```c
+physics_step_increment(...)
+```
+
+eventually reaches camera processing.
+
+So:
+
+```text
+mouse event
+ ↓
+input_write.mouse_delta = Δ
+ ↓
+swap
+ ↓
+main_inputs = read_buffer
+ ↓
+main_inputs.mouse_delta = 0
+ ↓
+camera reads 0
+```
+
+The mouse isn't merely losing some events.
+
+**The frame callback explicitly destroys the delta before the consumer sees it.**
+
+---
+
+# ☠️ Windows mouse tracking has another split-brain
+
+Windows uses:
+
+```c
+input_state->mouse_centered
+input_state->last_mouse_x
+input_state->last_mouse_y
+```
+
+and the handler gets:
+
+```c
+input_status *input_state = input_write;
+```
+
+But `mouse_lock_reset_centre()` does:
+
+```c
+main_inputs.mouse_centered = false;
+```
+
+So you've got:
+
+```text
+mouse motion:
+    input_write.mouse_centered
+
+mouse reset:
+    main_inputs.mouse_centered
+```
+
+Those are different objects.
+
+The reset isn't necessarily resetting the state the motion handler is consulting.
+
+That's a second independent mouse-state corruption.
+
+---
+
+# ☠️ Linux mouse has a different kind of death
+
+Linux uses X11 warping:
+
+```c
+gdk_device_warp(...)
+```
+
+and then immediately re-grabs the seat:
+
+```c
+gdk_seat_grab(...)
+```
+
+on every reset.
+
+That is an extraordinarily invasive operation to perform for every mouse movement.
+
+The sequence becomes approximately:
+
+```text
+mouse moves
+ ↓
+motion event
+ ↓
+calculate Δ
+ ↓
+warp pointer
+ ↓
+re-grab seat
+ ↓
+warp generates motion
+ ↓
+motion filter
+ ↓
+another event
+```
+
+and this is combined with:
+
+```c
+suppress_mouse_delta
+last_warp_x
+last_warp_y
+mouse_centered
+is_mouse_locked
+```
+
+while the logical lock state itself is alternating because of the input buffers.
+
+So the Linux mouse system is effectively:
+
+# **a state machine sitting on top of another state machine sitting on top of another state machine.**
+
+That's exactly what you don't want for relative mouse input.
+
+---
+
+# ☠️ Your display refresh rate and physics rate are now fighting
+
+Linux:
+
+```c
+gtk_widget_add_tick_callback(...)
+```
+
+means the callback is tied to the GTK frame clock.
+
+But your robot physics is:
+
+```c
+fixed_robot_dt = 1.0f / 60.0f;
+```
+
+and legacy physics is also:
+
+```c
+fixed_physics_dt = 1.0f / 60.0f;
+```
+
+So imagine a 144 Hz display.
+
+The frame callback happens roughly:
+
+```text
+6.94 ms
+```
+
+apart.
+
+But physics needs:
+
+```text
+16.67 ms
+```
+
+steps.
+
+Your accumulator therefore produces:
+
+```text
+frame 1: no physics
+frame 2: no physics
+frame 3: 1 physics step
+frame 4: no physics
+frame 5: no physics
+frame 6: 1 physics step
+...
+```
+
+The visual state is therefore approximately:
+
+```text
+A
+A
+B
+B
+B
+C
+C
+C
+D
+...
+```
+
+There is **no interpolation** between A and B.
+
+So on a 144/165/240 Hz monitor, the robot will visibly judder even if the physics is mathematically perfect.
+
+This is a completely separate source of the "display is jittery" symptom.
+
+---
+
+# ☠️ And camera movement uses a completely different clock
+
+The camera receives:
+
+```c
+frame_timer_update(&main_timer);
+```
+
+and uses:
+
+```c
+main_timer.delta_time
+```
+
+which is the actual time between callbacks.
+
+So:
+
+```text
+camera:
+    display/frame-clock timing
+
+robot:
+    60 Hz fixed timing
+
+legacy physics:
+    60 Hz fixed timing
+
+render:
+    GTK/GL scheduling
+```
+
+You have **four clocks/concepts of time** participating in one visual frame.
+
+That is asking for temporal inconsistency.
+
+---
+
+# ☠️ The Windows build is deliberately using a different clock
+
+Linux:
+
+```c
+gtk_widget_add_tick_callback(...)
+```
+
+Windows:
+
+```c
+g_timeout_add(16, ...)
+```
+
+So now:
+
+### Linux
+
+```text
+GTK frame clock
+```
+
+### Windows
+
+```text
+GLib timer ≈ 16 ms
+```
+
+And then both ultimately call:
+
+```c
+frame_timer_update()
+```
+
+using real wall-clock elapsed time.
+
+So Windows is not actually equivalent to Linux.
+
+At nominal 60 Hz:
+
+```text
+16 ms
+```
+
+is:
+
+```text
+62.5 Hz
+```
+
+while physics is:
+
+```text
+60 Hz
+```
+
+That produces a different accumulator pattern.
+
+And unlike the Linux callback, `g_timeout_add()` has no direct synchronization with the display refresh.
+
+So the Windows visual cadence can become:
+
+```text
+physics
+physics
+render
+physics
+render
+render
+physics
+...
+```
+
+depending on compositor scheduling.
+
+---
+
+# ☠️ The callback is registered BEFORE the window is shown
+
+You do:
+
+```c
+physics_timeout_id = g_timeout_add(...)
+```
+
+or:
+
+```c
+gtk_widget_add_tick_callback(...)
+```
+
+and only afterwards:
+
+```c
+gtk_widget_show_all(g_main_window);
+```
+
+This isn't the primary bug because the main loop hasn't started yet, but architecturally it is backwards.
+
+The robust order is:
+
+```text
+construct
+configure
+show
+realize
+initialize runtime
+start timing
+start simulation scheduling
+```
+
+rather than registering active simulation machinery while the UI is still being assembled.
+
+---
+
+# ☠️ `frame_timer_init()` is suspiciously late
+
+Same issue.
+
+You register the callback:
+
+```c
+gtk_widget_add_tick_callback(...)
+```
+
+then show the window, then:
+
+```c
+frame_timer_init(&main_timer);
+```
+
+Again, normal GTK scheduling probably saves you because callbacks don't run until `gtk_main()`.
+
+But this is unnecessarily dependent on event-loop ordering.
+
+A timing object should be initialized **before anything can possibly consume it.**
+
+---
+
+# ☠️ `physics_step_increment()` itself queues a render
+
+Inside:
+
+```c
+physics_step_increment()
+```
+
+you have:
+
+```c
+gtk_widget_queue_draw(...)
+```
+
+Then your new root callback does:
+
+```c
+physics_step_increment(...)
+gtk_widget_queue_draw(...)
+```
+
+So one simulation callback causes:
+
+```text
+physics
+ ↓
+queue draw
+
+return
+ ↓
+queue draw again
+```
+
+GTK coalesces invalidations, so this doesn't necessarily produce two actual renders.
+
+But it is still architecturally wrong.
+
+The owner of the frame loop should decide:
+
+> "This frame needs rendering."
+
+The physics function should not know that a GUI exists.
+
+---
+
+# ☠️ The UI is being mutated from the simulation callback
+
+This is the next major category.
+
+At the end of `physics_step_increment()`:
+
+```c
+overlay_update();
+```
+
+And `overlay_update()` performs things like:
+
+```c
+gtk_label_set_text(...)
+gtk_widget_show(...)
+gtk_widget_hide(...)
+```
+
+every simulation tick.
+
+That means the simulation callback is doing:
+
+```text
+physics
+↓
+input
+↓
+menus
+↓
+editor
+↓
+config
+↓
+robot physics
+↓
+UI layout mutation
+```
+
+all in one callback.
+
+This is an extremely bad separation of responsibilities.
+
+---
+
+# ☠️ Your HUD text is regenerated every frame
+
+This is particularly relevant to your "text is jittery" observation.
+
+Every frame:
+
+```c
+gtk_label_set_text(GTK_LABEL(debug_information_label),
+                   information_text_buffer);
+```
+
+is called.
+
+Even if the text hasn't meaningfully changed.
+
+And the string contains live quantities:
+
+```text
+Obj
+Pairs
+Manifolds
+Cache H
+Cache M
+Sleep
+robot voltage
+robot RPM
+position
+speed
+```
+
+So the label contents can change continuously.
+
+GTK therefore has to repeatedly:
+
+```text
+set text
+ ↓
+recompute label layout
+ ↓
+potentially resize allocation
+ ↓
+repaint
+```
+
+You're making your UI layout engine participate in the simulation loop.
+
+---
+
+# ☠️ Centered labels guarantee positional jitter when their width changes
+
+Your menu labels use:
+
+```c
+gtk_widget_set_halign(..., GTK_ALIGN_CENTER);
+gtk_widget_set_valign(..., GTK_ALIGN_CENTER);
+```
+
+A centered widget whose natural width changes is necessarily repositioned.
+
+Suppose:
+
+```text
+"RPM: 99"
+```
+
+becomes:
+
+```text
+"RPM: 100"
+```
+
+The label's width changes.
+
+GTK keeps the label centered:
+
+```text
+old:
+       [ RPM: 99 ]
+
+new:
+      [ RPM: 100 ]
+```
+
+The left edge moves.
+
+That is literal visual movement of the text.
+
+For rapidly changing values, this becomes visible as jitter.
+
+For a centered multi-line menu, it can be even more pronounced because the longest line determines the natural width.
+
+### The solution isn't "update GTK faster."
+
+It is:
+
+**Give the UI stable geometry.**
+
+For example:
+
+```text
+fixed overlay panel
+    ↓
+fixed x/y
+    ↓
+fixed width
+    ↓
+text changes inside it
+```
+
+rather than letting natural text dimensions determine placement.
+
+---
+
+# ☠️ The debug HUD is also doing variable-width formatting
+
+You have:
+
+```c
+" | R%d: %.1fV %dRPM"
+```
+
+So as values change:
+
+```text
+11.9V
+12.0V
+9.8V
+```
+
+the glyph widths and string width change.
+
+And the selected-object HUD contains:
+
+```c
+"Pos: (%.1f, %.1f, %.1f) | Speed: %.2f"
+```
+
+So:
+
+```text
+Speed: 9.99
+```
+
+becomes:
+
+```text
+Speed: 10.00
+```
+
+etc.
+
+This isn't just data changing.
+
+**You're changing the rendered text geometry every simulation update.**
+
+---
+
+# ☠️ The UI isn't actually synchronized with the GL render
+
+This is the architectural problem underneath the text issue.
+
+You have:
+
+```text
+GTK tick callback
+       ↓
+simulation
+       ↓
+GTK label mutation
+       ↓
+queue GL redraw
+```
+
+The label is a normal GTK widget.
+
+The simulation is updating the OpenGL object's state.
+
+Then GTK eventually decides when to paint the whole hierarchy.
+
+There is no explicit:
+
+```text
+simulation snapshot
+        ↓
+render snapshot
+        ↓
+GTK frame
+```
+
+boundary.
+
+So UI and GL state are simply whatever happens to be current when GTK gets around to painting.
+
+Usually that's okay.
+
+Under load, resize, compositor pressure, or a slow physics step, it becomes visually inconsistent.
+
+---
+
+# ☠️ The robot visual proxy has an even more direct 60 Hz snapping problem
+
+This is important.
+
+`gui_robot_tick()` does:
+
+```c
+while (robot_accumulator >= fixed_robot_dt) {
+    ...
+    physics_world_step(...);
+}
+```
+
+then immediately:
+
+```c
+dst->position = src->position;
+dst->orientation = src->orientation;
+```
+
+So the render object is set to the most recent **completed 60 Hz physics state**.
+
+There is no:
+
+```text
+previous_state
+current_state
+alpha
+```
+
+and therefore no interpolation.
+
+Your renderer is perfectly capable of rendering at 144 Hz.
+
+You're simply feeding it:
+
+```text
+60 Hz sampled positions
+```
+
+and asking it to display them at the monitor rate.
+
+That's textbook temporal aliasing.
+
+---
+
+# ☠️ The legacy world has the same problem
+
+`simulation_physics_tick()` also only advances its world in:
+
+```c
+1.0f / 60.0f
+```
+
+increments.
+
+But `render_scene_current()` reads:
+
+```c
+rigid_body->position
+rigid_body->orientation
+```
+
+directly.
+
+Again:
+
+```text
+60 Hz state
+     ↓
+144 Hz render
+```
+
+with no interpolation.
+
+So even if you completely removed MFS, the current high-refresh display path would still exhibit stepping.
+
+---
+
+# ☠️ There is no explicit render-state snapshot
+
+The renderer directly reads mutable simulation objects:
+
+```c
+rigidbody *rigid_body = &obj_per_scene[object_index];
+```
+
+while the simulation has just modified those objects.
+
+You're relying entirely on:
+
+```text
+"everything happens on the GTK main thread"
+```
+
+for consistency.
+
+That works against actual data races, but it doesn't solve temporal consistency.
+
+You need:
+
+```text
+simulation state
+        ↓
+render state
+        ↓
+renderer
+```
+
+even if the snapshot happens on the same thread.
+
+---
+
+# ☠️ Camera has a separate problem: movement is intentionally velocity-based
+
+Your camera movement does:
+
+```c
+horizontal_velocity += direction *
+                       movement_speed *
+                       8.0f *
+                       delta_time;
+```
+
+then:
+
+```c
+horizontal_velocity -=
+    horizontal_velocity *
+    friction *
+    delta_time;
+```
+
+then the latest commit adds:
+
+```c
+if (!W && !A && !S && !D)
+    horizontal_velocity = 0;
+```
+
+So the camera's behavior is:
+
+```text
+press W
+    ↓
+accelerate
+
+release W
+    ↓
+instant stop
+```
+
+That is already a hybrid acceleration/teleport model.
+
+But because your input state is alternating:
+
+```text
+W true
+W false
+W true
+W false
+```
+
+the camera gets:
+
+```text
+accelerate
+stop
+accelerate
+stop
+```
+
+which makes the display itself look like it is shaking.
+
+So the apparent "text jitter" can actually be accompanied by **camera micro-motion**.
+
+The entire OpenGL scene is then shifting underneath the GTK text overlay.
+
+That makes the visual artifact substantially more noticeable.
+
+---
+
+# ☠️ IJKL is even more directly tied to frame cadence
+
+This:
+
+```c
+float ijkl_speed =
+    g_cfg.camera.ijkl_speed * frame_delta_time;
+```
+
+means rotation is frame-time based.
+
+That's normally good.
+
+But with:
+
+```text
+I true
+I false
+I true
+I false
+```
+
+the camera rotates:
+
+```text
+Δθ
+0
+Δθ
+0
+```
+
+rather than:
+
+```text
+Δθ
+Δθ
+Δθ
+Δθ
+```
+
+So the camera motion itself is visibly discontinuous.
+
+---
+
+# ☠️ Focus handling can resurrect keys
+
+Your focus-out handler clears:
+
+```c
+input_write->w_key_pressed = false;
+...
+input_write->i_key_pressed = false;
+```
+
+It does **not clear both buffers**.
+
+So:
+
+```text
+focus lost
+ ↓
+write cleared
+ ↓
+read still says W=true
+ ↓
+swap
+ ↓
+W comes back
+```
+
+This is exactly how you can get:
+
+> "I tabbed out / opened a dialog / clicked something and now the movement is stuck."
+
+The focus system is not actually authoritative over input state.
+
+---
+
+# ☠️ Dialogs make the problem worse
+
+You have:
+
+```c
+if (editor_dialog_is_active()) {
+    return TRUE;
+}
+```
+
+at the top of the physics callback.
+
+So while a dialog is active:
+
+```text
+simulation stops
+```
+
+but GTK is still processing:
+
+* keyboard events
+* mouse events
+* focus events
+
+into the input buffers.
+
+Therefore when the dialog closes, the simulation can resume with a backlog of stale input state.
+
+That's another route to:
+
+> phantom movement.
+
+---
+
+# ☠️ Opening the terminal changes focus domains
+
+The terminal explicitly does:
+
+```c
+gtk_widget_grab_focus(terminal_entry);
+```
+
+while the main window's keyboard state is still being maintained separately.
+
+When terminal focus changes:
+
+```text
+main window loses focus
+terminal gains focus
+```
+
+your focus-out handler clears only the current write buffer.
+
+Again:
+
+```text
+other buffer = potentially stale
+```
+
+so terminal interaction can leave the simulation input in a corrupted state.
+
+---
+
+# ☠️ Your event handlers are attached to the main window, not the actual interactive GL surface
+
+You have:
+
+```c
+g_signal_connect(g_main_window,
+                 "key-press-event", ...);
+
+g_signal_connect(g_main_window,
+                 "motion-notify-event", ...);
+```
+
+and:
+
+```c
+gtk_widget_add_events(g_main_window, ...)
+```
+
+This makes the **top-level window** the event surface.
+
+That's workable for keyboard events.
+
+It is substantially less clean for mouse-relative simulation because the actual mouse target is:
+
+```text
+GtkWindow
+ └── GtkOverlay
+      ├── GtkGLArea
+      └── GtkLabels
+```
+
+The pointer can therefore interact with child widgets and propagation paths.
+
+For a game-like surface, I'd make the GL area the actual pointer/keyboard input target and deliberately make overlay widgets non-interactive unless they need interaction.
+
+---
+
+# ☠️ You never explicitly make the GL area the focus target
+
+Instead:
+
+```c
+gtk_widget_set_can_focus(g_main_window, TRUE);
+gtk_widget_grab_focus(g_main_window);
+```
+
+The main window is being used as a pseudo-input device.
+
+I'd much rather have:
+
+```text
+GtkWindow
+   │
+   └── GtkOverlay
+         │
+         └── GtkGLArea
+               ↑
+             focus
+               ↑
+          keyboard input
+```
+
+and then let actual GTK widgets take focus only when needed.
+
+That makes focus ownership explicit.
+
+---
+
+# ☠️ Your Linux build forcibly switches to X11
+
+You have:
+
+```c
+g_setenv("GDK_BACKEND", "x11", TRUE);
+```
+
+under Linux.
+
+That means you're deliberately bypassing Wayland if the system otherwise supports it.
+
+For a simulator whose mouse implementation already relies on:
+
+```c
+gdk_device_warp()
+gdk_window_get_origin()
+```
+
+this is understandable.
+
+But it also means your Linux display behavior is tied to:
+
+```text
+X11 + GTK3 + XInput/GDK pointer semantics
+```
+
+rather than modern compositor-neutral GTK behavior.
+
+It isn't the primary regression, but it is a platform-specific source of future pain.
+
+---
+
+# ☠️ Your mouse coordinate system is also inconsistent
+
+Windows:
+
+```c
+event->x
+event->y
+```
+
+which are widget-relative.
+
+Linux:
+
+```c
+event->x_root
+event->y_root
+```
+
+which are root-window coordinates.
+
+Then Linux manually calculates:
+
+```c
+screen_origin + widget_center
+```
+
+while Windows simply subtracts previous widget-relative positions.
+
+So the two platforms aren't using the same coordinate model.
+
+That means DPI scaling, window movement, multi-monitor transitions, and fractional scaling can produce different mouse behavior.
+
+---
+
+# ☠️ Linux center calculation doesn't account for scale factor
+
+Your render path explicitly does:
+
+```c
+allocated_width * scale_factor
+```
+
+but the mouse path uses:
+
+```c
+gtk_widget_get_allocated_width(widget) / 2
+```
+
+without the scale factor.
+
+So on a HiDPI display:
+
+```text
+render coordinate system:
+    physical pixels
+
+mouse center:
+    logical GTK pixels
+```
+
+Those aren't necessarily the same coordinate space.
+
+That can create a systematic mouse-centering offset.
+
+On a 200% display, this can become enormous.
+
+And that is especially nasty because you're then warping the cursor to the wrong location.
+
+---
+
+# ☠️ The 80-pixel mouse delta clamp is arbitrary and frame-rate dependent
+
+You have:
+
+```c
+if (delta_x > 80) delta_x = 80;
+if (delta_x < -80) delta_x = -80;
+```
+
+This is applied to an event delta.
+
+If the pointer moves rapidly, GDK can deliver different event batching depending on load and platform.
+
+So:
+
+```text
+slow:
+    20 + 20 + 20
+
+fast:
+    80
+```
+
+can produce different total camera rotation.
+
+This makes camera sensitivity dependent on event batching.
+
+A relative-input accumulator should accumulate raw deltas and consume them once per frame, rather than arbitrarily truncating each individual event.
+
+---
+
+# ☠️ And you're overwriting mouse delta rather than accumulating it
+
+This:
+
+```c
+input_state->mouse_delta_x = delta_x;
+```
+
+means if five motion events arrive before the next simulation tick:
+
+```text
+event 1: +5
+event 2: +4
+event 3: +7
+event 4: +3
+event 5: +8
+```
+
+you don't get:
+
+```text
++27
+```
+
+You get:
+
+```text
++8
+```
+
+the last event.
+
+That's catastrophic for high-polling-rate mice.
+
+It makes camera movement dependent on how GTK batches pointer events.
+
+The correct operation is:
+
+```c
+mouse_delta_x += delta_x;
+mouse_delta_y += delta_y;
+```
+
+followed by consumption/reset once per frame.
+
+---
+
+# ☠️ The overlay text update is not change-aware
+
+You could avoid a massive amount of GTK churn by keeping:
+
+```c
+static char previous_text[...];
+```
+
+and only doing:
+
+```c
+gtk_label_set_text(...)
+```
+
+when:
+
+```c
+strcmp(new_text, previous_text) != 0
+```
+
+Right now, every frame effectively says:
+
+> "GTK, here is some text."
+
+even when nothing meaningful changed.
+
+---
+
+# ☠️ The renderer has no explicit GL error discipline
+
+`render_init()` checks shader creation:
+
+```c
+if (...) {
+    render_init_status = RENDER_FAILED;
+}
+```
+
+but after initialization, the rendering path has essentially no:
+
+```c
+glGetError()
+```
+
+diagnostics.
+
+For a cross-platform GL program, especially one running through GTK's GLArea, I'd want a debug-only GL validation layer.
+
+Something like:
+
+```text
+before frame
+after clear
+after grid
+after instancing
+after utility rendering
+after swap
+```
+
+with `glGetError()` assertions.
+
+Not because I think GL errors are the current primary problem — I don't.
+
+Because when you're trying to make the software **fear you**, you don't let the GPU silently participate in the conspiracy.
+
+---
+
+# ☠️ Resource cleanup is lying
+
+`render_cleanup()` does:
+
+```c
+free(sphere_instances);
+free(cube_instances);
+render_init_status = RENDER_UNINITIALIZED;
+```
+
+but does not delete:
+
+* shader programs
+* VAOs
+* VBOs
+* meshes
+* textures, if any
+
+So the function is called:
+
+```c
+render_cleanup()
+```
+
+but it doesn't actually clean up the GL resource set.
+
+For the normal one-process lifetime, this may not hurt much.
+
+But if the GL context is recreated or the renderer is reinitialized, you've got a resource lifecycle problem.
+
+---
+
+# ☠️ There is no explicit swap/render policy
+
+The program assumes GTK's `GtkGLArea` handles presentation.
+
+That's normal.
+
+But there's no explicit control or diagnostic of:
+
+```text
+frame clock
+render time
+physics time
+buffer swap time
+```
+
+So when you say:
+
+> "the display is jittery"
+
+the current architecture doesn't give you enough instrumentation to answer:
+
+```text
+Was the simulation late?
+Was GTK late?
+Was rendering late?
+Was the compositor late?
+Was the widget allocation changed?
+Did the GLArea redraw?
+Did the frame callback miss a refresh?
+```
+
+You need those numbers.
+
+---
+
+# What I think is actually happening on your machine
+
+Putting all of this together, I would expect something like:
+
+```text
+             GTK EVENT LOOP
+                  │
+         key/mouse events arrive
+                  │
+                  ▼
+             input_write
+                  │
+                  │
+        ┌─────────┴─────────┐
+        │                   │
+     buffer A            buffer B
+        │                   │
+        └─────── swap ──────┘
+                  │
+                  ▼
+          alternating state
+                  │
+        ┌─────────┴────────────┐
+        │                      │
+      camera                 UI
+        │                      │
+   moves/stops             labels update
+   moves/stops             every tick
+        │                      │
+        ▼                      ▼
+     GL state             GTK layout
+        │                      │
+        └──────────┬───────────┘
+                   ▼
+              render request
+                   │
+                   ▼
+          60 Hz physics state
+                   │
+                   ▼
+        120/144/165/240 Hz display
+                   │
+                   ▼
+             temporal jitter
+```
+
+So you actually have **three independent jitter sources**:
+
+### 1. Input jitter
+
+```text
+TRUE / FALSE / TRUE / FALSE
+```
+
+### 2. Physics/render jitter
+
+```text
+60 Hz physics
+vs
+display refresh
+```
+
+### 3. UI layout jitter
+
+```text
+changing label dimensions
++
+center alignment
++
+per-frame GTK relayout
+```
+
+And they can reinforce one another.
+
+---
+
+# The hierarchy of fixes
+
+If I were allowed to tear this subsystem apart, I would do it in this order.
+
+## 🔥 Phase 0 — kill the double buffer
+
+Immediately.
+
+Not patch it.
+
+**Remove it.**
+
+For this architecture, GTK events and the simulation callback are on the same main thread.
+
+Use one persistent state:
+
+```c
+static input_state input;
+```
+
+Held keys:
+
+```text
+keypress → true
+keyrelease → false
+```
+
+Mouse:
+
+```text
+motion → accumulate delta
+```
+
+One-shot events:
+
+```text
+keypress → set event
+simulation → consume and clear event
+```
+
+No two copies of the entire state.
+
+---
+
+# 🔥 Phase 1 — split input into state and events
+
+Something like:
+
+```c
+typedef struct {
+    bool w, a, s, d;
+    bool i, j, k, l;
+    bool space, shift;
+
+    bool mouse_locked;
+
+    float mouse_dx;
+    float mouse_dy;
+} input_state;
+
+typedef struct {
+    bool escape;
+    bool f;
+    bool r;
+    bool delete;
+    bool menu_1;
+    ...
+} input_events;
+```
+
+Then the semantics become unambiguous.
+
+---
+
+# 🔥 Phase 2 — make mouse relative input actually relative
+
+On every event:
+
+```c
+input.mouse_dx += dx;
+input.mouse_dy += dy;
+```
+
+At frame start:
+
+```c
+float dx = input.mouse_dx;
+float dy = input.mouse_dy;
+
+input.mouse_dx = 0;
+input.mouse_dy = 0;
+```
+
+That's it.
+
+No 80-pixel event clamp.
+
+No fake centering state.
+
+No `mouse_centered` in the input state.
+
+---
+
+# 🔥 Phase 3 — one simulation clock
+
+I would make the architecture:
+
+```text
+GTK frame clock
+      │
+      ├── calculate frame dt
+      │
+      ├── consume input
+      │
+      ├── advance fixed physics
+      │
+      ├── update camera
+      │
+      └── prepare render state
+              │
+              ▼
+          GL render
+```
+
+Physics stays fixed at:
+
+```text
+1/60 s
+```
+
+but the renderer gets:
+
+```text
+previous physics state
+current physics state
+alpha
+```
+
+---
+
+# 🔥 Phase 4 — interpolation
+
+For every renderable body:
+
+```c
+render_position =
+    previous_position * (1-alpha) +
+    current_position * alpha;
+```
+
+For orientation:
+
+```text
+slerp(previous_orientation,
+      current_orientation,
+      alpha)
+```
+
+Then the display becomes:
+
+```text
+physics:
+A -------- B -------- C
+
+render:
+A . . . . B . . . . C
+```
+
+instead of:
+
+```text
+A A A B B B C C C
+```
+
+This is the correct way to make a 60 Hz physics engine look smooth on a 144 Hz monitor.
+
+---
+
+# 🔥 Phase 5 — make the UI a render consumer, not a simulation participant
+
+Instead of:
+
+```c
+physics_step_increment()
+    ↓
+overlay_update()
+    ↓
+gtk_label_set_text()
+```
+
+I'd use:
+
+```text
+simulation
+    ↓
+UI state snapshot
+    ↓
+frame/render callback
+    ↓
+UI update if changed
+```
+
+And update labels **only when their contents actually change.**
+
+---
+
+# 🔥 Phase 6 — fixed UI geometry
+
+For the center menus:
+
+```text
+GtkOverlay
+    └── fixed-size centered panel
+          └── label
+```
+
+or use:
+
+```c
+gtk_widget_set_size_request(...)
+```
+
+with explicit alignment.
+
+The text should change *inside a stable rectangle*.
+
+It should never move merely because:
+
+```text
+"9.99"
+```
+
+became:
+
+```text
+"10.00"
+```
+
+---
+
+# 🔥 Phase 7 — instrument the bastard
+
+I would add a debug HUD showing:
+
+```text
+FRAME
+  dt:       6.94 ms
+  FPS:      144.1
+  render:   1.7 ms
+
+PHYSICS
+  dt:       16.67 ms
+  steps:    0/1/2
+  accumulator: 8.2 ms
+
+INPUT
+  W:        0
+  I:        1
+  mouse:    +13,-4
+
+GTK
+  scale:    1
+  allocation: 1920×1080
+```
+
+Then you'll know immediately whether:
+
+```text
+input
+physics
+render
+GTK
+```
+
+is the culprit.
+
+---
+
+# And here's the part I find most damning
+
+The Git history gives us an almost perfect regression boundary.
+
+Before the recent rewrite, the system was simply:
+
+```text
+GTK event
+    ↓
+main_inputs
+    ↓
+16 ms callback
+    ↓
+simulation
+```
+
+Then the recent stability work introduced:
+
+```text
+double-buffered input
++
+frame callback
++
+Windows fallback timer
++
+platform-specific mouse state
++
+new focus behavior
+```
+
+And now you have exactly the kinds of failures those changes can create.
+
+So I would **not** start debugging the GPU.
+
+I would **not** start changing font sizes.
+
+I would **not** start tweaking `gtk_widget_queue_draw()`.
+
+And I would absolutely **not** add another "safety" boolean.
+
+The display subsystem currently has an architectural failure:
+
+> **Input state has no single source of truth, simulation timing has no single presentation clock, and UI geometry is allowed to react to changing simulation data.**
+
+That's why the symptoms look like a haunted machine rather than one clean bug.
+
+---
+
+# My severity board
+
+| Area                          |  Severity | Current condition                          |
+| ----------------------------- | --------: | ------------------------------------------ |
+| Held keyboard state           | 🔴 **P0** | Deterministically alternates               |
+| One-shot keyboard events      | 🔴 **P0** | Can resurrect                              |
+| Mouse lock state              | 🔴 **P0** | Split-brain                                |
+| Mouse delta                   | 🔴 **P0** | Explicitly zeroed                          |
+| Mouse accumulation            | 🔴 **P0** | Last event wins                            |
+| Focus clearing                | 🔴 **P0** | Only one buffer cleared                    |
+| Physics/render cadence        | 🔴 **P0** | 60 Hz state displayed at arbitrary refresh |
+| Robot visual interpolation    | 🔴 **P0** | None                                       |
+| Linux/Windows timing          | 🟠 **P1** | Different scheduling architectures         |
+| Linux HiDPI mouse coordinates | 🟠 **P1** | Logical/physical mismatch                  |
+| UI update frequency           | 🟠 **P1** | Every simulation tick                      |
+| Centered changing labels      | 🟠 **P1** | Natural-width repositioning                |
+| UI/physics separation         | 🟠 **P1** | Poor                                       |
+| GL diagnostics                | 🟡 **P2** | Insufficient                               |
+| GL resource cleanup           | 🟡 **P2** | Incomplete                                 |
+| X11 hard-force                | 🟡 **P2** | Platform restriction                       |
+| Render-state snapshot         | 🟡 **P2** | Missing                                    |
+
+## So if you want the "software bug to fear me like a despot" version:
+
+**The current display system is not one bug away from being fixed. It is currently violating three fundamental invariants:**
+
+```text
+INVARIANT 1
+A held key must have exactly one authoritative state.
+
+BROKEN.
+
+INVARIANT 2
+A mouse delta must survive until exactly one consumer consumes it.
+
+BROKEN.
+
+INVARIANT 3
+A render frame must correspond to a temporally coherent simulation state.
+
+BROKEN.
+```
+
+And then there's a fourth:
+
+```text
+INVARIANT 4
+Changing HUD contents must not change the HUD's intended geometry.
+
+BROKEN for centered dynamic labels.
+```
+
+**Fix those four invariants and I expect the "WTF is happening to the display" class of problems to collapse dramatically.**
+
+The particularly good news is that I don't think you need to touch the actual MPE rendering mathematics to accomplish this. The renderer itself is comparatively boring. **The crime scene is the glue around it: `root_gtk.c` → `input_control.c` → `simulation.c` → `gui_robot_registry.c` → `overlay.c`.**
+
+That is where I would put the flamethrower.
+
