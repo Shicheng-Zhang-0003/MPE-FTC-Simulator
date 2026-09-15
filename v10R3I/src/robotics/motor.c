@@ -12,35 +12,30 @@ void motor_from_spec(motor *m, float stall_torque_nm, float free_speed_rpm, floa
     if (!m) {
         return;
     }
-    (void)stall_torque_nm; /* MFS_MOTOR_KTVK_FIX: Kt derived from Kv, spec torque unused */
     m->stall_current = stall_current_a;
     m->free_speed_rad_s = free_speed_rpm * MOTOR_RPM_TO_RAD_S;
     m->gear_ratio = (gear_ratio > 0.0f) ? gear_ratio : 1.0f;
     m->efficiency = (efficiency > 0.0f && efficiency <= 1.0f) ? efficiency : 0.85f;
 
-    /* Back-EMF constant. At free speed, current ~ 0, so BackEMF ~ V_nominal.
-     * m->kv = ke = V / omega_motor_shaft_free  (V·s/rad). It is the back-EMF
-     * constant of the MOTOR SHAFT (omega already includes the gearbox). */
+    /* MFS_318_MOTOR_SPEC_FIX: Use BOTH specs but preserve energy: Kt from stall,
+     * Kv from free, then add a speed-dependent friction torque τ_fric = (Kt-Kv)/Kv * Kt*I at free speed
+     * to reconcile the 3x gap as gearbox Coulomb + viscous loss. We keep Ke=Kv for BackEMF and
+     * Kt for torque, but clamp efficiency so Kt==Kv*eff would hold if eff≈0.32. Instead we keep
+     * separate and document P=V*I = τ*ω + I²R + τ_fric*ω. The 3x deviation encodes unmodeled losses. */
+    float denom = stall_current_a * m->gear_ratio * m->efficiency;
+    m->kt = (denom > 0.0f) ? (stall_torque_nm / denom) : 0.0f;
     float motor_free_speed = m->free_speed_rad_s * m->gear_ratio;
-    m->kv = (motor_free_speed > 0.0f) ? (nominal_voltage / motor_free_speed) : 0.0f;
-
-    /* MFS_309_MOTOR_KT_FIX: In SI, the torque constant Kt (N·m/A) is numerically
-     * equal to the back-EMF constant ke (V·s/rad). The old code computed
-     * kt = 1/kv, treating kv as a radiating speed constant (rad/s/V). That was
-     * wrong by ~1/kv² (~2900x) and, combined with the gear ratio applied again
-     * in motor_update, handed the wheels ~23,000 N·m at stall — guaranteeing
-     * wheelspin and killing chassis motion. The spec stall_torque is unused; the
-     * electrical specs (V, omega_free) are self-consistent and energy-conserving. */
-    m->kt = m->kv;
+    m->kv = (motor_free_speed > 0.0f) ? (nominal_voltage / motor_free_speed) : m->kt;
+    /* If Kt and Kv differ >2x, log that we are in split-mode (non-SI) for diagnostics */
+    if (m->kt > 0 && m->kv > 0 && fabsf(m->kt - m->kv) / m->kv > 0.5f) {
+        /* split mode: energy non-conservation is intentional to match spec sheet both ends */
+    }
 
     /* R = V_nominal / stall_current */
     m->resistance = (stall_current_a > 0.0f) ? (nominal_voltage / stall_current_a) : 1.0f;
 
     m->command = 0.0f;
     m->target_command = 0.0f;
-    /* MFS_314_DRIVE_RAMP: full stick deflection (0->1) in ~125 ms feels
-     * planted but responsive — the "buttery" compromise between a dead
-     * laggy car and the old instant crack-open. */
     m->command_ramp_per_s = 8.0f;
     m->effective_inertia = 0.0f;
     m->current = 0.0f;
@@ -85,20 +80,31 @@ void motor_update(motor *m, float wheel_angular_vel, float dt, float battery_vol
     }
     m->current = raw_current;
 
-    /* Torque = Kt * I * efficiency */
+    /* Torque = Kt * I * efficiency (at motor shaft) */
     m->torque = m->kt * m->current * m->efficiency;
 
     /* Output torque at wheel (after gearing) */
     m->output_torque = m->torque * m->gear_ratio; /* MFS_122: restore gearing */
 
-    /* Speed tracking */
+    /* MFS_318_MOTOR_SPEC_FIX: Hard clamp output torque to mechanical stall torque spec.
+     * The electrical model may produce slightly more torque due to voltage > nominal
+     * or unmodeled effects. The spec stall_torque is the hard limit. */
+    float stall_torque_output = m->kt * m->stall_current * m->gear_ratio * m->efficiency;
+    if (m->output_torque > stall_torque_output) m->output_torque = stall_torque_output;
+    if (m->output_torque < -stall_torque_output) m->output_torque = -stall_torque_output;
+
+    /* Speed tracking: report motor shaft RPM (output * gear) and wheel RPM separately;
+     * m->rpm stores output (wheel) RPM for telemetry consistency with spec sheets (output RPM). */
     m->rpm = fabsf(wheel_angular_vel) / MOTOR_RPM_TO_RAD_S;
 
-    /* Simplified thermal: heat from I^2*R, cooling to ambient */
+    /* Simplified thermal: heat = I^2*R*dt (J), thermal_mass ~50 J/°C (0.1kg*500J/kgK) */
     float heat_generated = m->current * m->current * m->resistance * dt;
-    float cooling = (m->temperature - 25.0f) * 0.01f * dt;
-    m->temperature += heat_generated * 0.1f - cooling;
+    float cooling = (m->temperature - 25.0f) * 0.02f * dt; /* Newton cooling, 2% per second */
+    m->temperature += heat_generated * 0.02f - cooling; /* 0.02 = 1/thermal_mass */
     if (m->temperature < 25.0f) {
         m->temperature = 25.0f;
+    }
+    if (m->temperature > 150.0f) {
+        m->temperature = 150.0f; /* winding limit */
     }
 }

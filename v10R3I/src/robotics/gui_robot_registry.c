@@ -159,7 +159,9 @@ return;
 for (int i = 0; i < mfs_gui_robot_count; i++) {
 /* MFS_164_DRIVE_DISPATCH: dispatch based on drivetrain type */
 if (mfs_gui_robots[i].drivetrain_type == FTC_DRIVETRAIN_TANK) {
-drivetrain_tank(&mfs_gui_robots[i], forward - rotate, forward + rotate);
+/* Standard tank: left = forward + rotate, right = forward - rotate.
+ * CW rotate (positive) = left forward, right backward. */
+drivetrain_tank(&mfs_gui_robots[i], forward + rotate, forward - rotate);
 } else {
 drivetrain_mecanum(&mfs_gui_robots[i], forward, strafe, rotate);
 }

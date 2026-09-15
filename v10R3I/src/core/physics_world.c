@@ -41,6 +41,7 @@ void physics_world_init(physics_world *world) {
     }
     memset(world, 0, sizeof(physics_world));
     world->magic = MFS_WORLD_MAGIC;
+    constraint_pool_init(); /* MFS: bump generation so new world's joints don't see stale pool */
 
     if (!world->bodies) {
         world->bodies = (rigidbody *) malloc((size_t) mpe_max_bodies * sizeof(rigidbody));
@@ -57,11 +58,13 @@ void physics_world_init(physics_world *world) {
     }
     /* MFS_300B: Walls moved AFTER allocation so add_cube works. */
     /* MFS_202_R307: FTC field containment walls (12ft x 12ft).
-     * Prevents bodies from escaping to infinity and producing NaN. */
+     * Prevents bodies from escaping to infinity and producing NaN.
+     * Hardened: thickness 2 in (was 1 in) to reduce tunneling without CCD,
+     * height 0.5m to prevent jump-over; still static so no solver cost. */
     {
         float half_w = 1.8288f;   /* 6 ft */
-        float wall_h = 0.3048f;   /* 12 in */
-        float wall_t = 0.0254f;   /* 1 in */
+        float wall_h = 0.5f;   /* 20 in, hardened */
+        float wall_t = 0.0508f;   /* 2 in, hardened */
 
         /* North wall */
         physics_world_add_cube(world,
@@ -268,40 +271,71 @@ void physics_world_step(physics_world *world, float dt) {
         for (int m = 0; m < manifold_count; m++) {
             collision_resolve_iterative(&world_manifolds[m]);
         }
-        /* MFS_SOLVER_FIX: solve joints inside the iteration loop so friction
-         * impulses properly transfer through revolute constraints to the chassis */
         constraint_solve_all(world->bodies, world->body_count, dt);
     }
-    /* MFS_150_WHEEL_LOCK: gearbox back-drive friction locks stationary wheels.
-     * After the contact solver, any mecanum wheel with small axle omega is
-     * locked to prevent the idle spin from the contact solver injecting
-     * angular momentum. This is truthful: a real unpowered mecanum wheel
-     * can't spin freely because the gearbox resists back-driving. */
+
+    /* MFS_150_WHEEL_LOCK: torque-based lock for idle mecanum wheels.
+     * Replaces velocity snap with a brake torque opposing axle spin, limited to I*ω/dt. */
     for (int i = 0; i < world->body_count; i++) {
         rigidbody *rb = &world->bodies[i];
-        if (rb->is_mecanum && !rb->driven_this_tick) { /* MFS_169 */
+        if (rb->is_mecanum && !rb->driven_this_tick) {
             vector3 axle = rb->cached_axes[0];
             if (vector3_length_squared(axle) < 0.0001f) {
                 axle = vector4_rotate_to_vector3(rb->orientation, (vector3){1.0f, 0.0f, 0.0f});
             }
             float axle_omega = vector3_dot(rb->angular_velocity, axle);
-            if (fabsf(axle_omega) < g_cfg.solver.wheel_lock_omega_thresh) { /* MFS_166_WHEEL_LOCK_CFG */
-                rb->angular_velocity = vector3_subtraction(
-                    rb->angular_velocity,
-                    vector3_scaling(axle, axle_omega));
+            float thresh = g_cfg.solver.wheel_lock_omega_thresh;
+            if (thresh <= 0.0f) thresh = 1.5f;
+            if (fabsf(axle_omega) < thresh && fabsf(axle_omega) > 0.001f) {
+                float brake_tau = 0.12f;
+                float eff_I = rb->inertia_tensor_local.matrix[0][0];
+                if (eff_I < 0.0001f) eff_I = 0.000625f;
+                float max_tau = fabsf(axle_omega) * eff_I / dt;
+                if (brake_tau > max_tau) brake_tau = max_tau;
+                float sign = (axle_omega > 0.0f) ? -1.0f : 1.0f;
+                float inv_xx = rb->inverse_inertia_system.matrix[0][0];
+                if (inv_xx < 0.0001f) inv_xx = 1.0f / eff_I;
+                float delta_omega = sign * brake_tau * dt * inv_xx;
+                if (fabsf(delta_omega) > fabsf(axle_omega)) delta_omega = -axle_omega;
+                rb->angular_velocity = vector3_addition(rb->angular_velocity, vector3_scaling(axle, delta_omega));
             }
         }
     }
 
     contact_cache_save(world, world_manifolds, manifold_count);
 
-/* MFS_169: clear driven flag at end of step */
-for (int i = 0; i < world->body_count; i++) {
-world->bodies[i].driven_this_tick = false;
-} /* MFS_131 */
+    /* Clear driven_this_tick flag at end of step */
+    for (int i = 0; i < world->body_count; i++) {
+        world->bodies[i].driven_this_tick = false;
+    }
 
     for (int i = 0; i < world->body_count; i++) {
         rb_integrate_position(&world->bodies[i], dt);
+        /* Hard clamp to field bounds to prevent tunneling without CCD.
+         * Clamp X/Z so body edge stays inside wall. Y not clamped here (floor handles it). */
+        if (!world->bodies[i].static_state) {
+            float half_w = 1.8288f;
+            float margin_x = 0.1f, margin_z = 0.1f;
+            if (world->bodies[i].type == object_cube) {
+                margin_x = world->bodies[i].half_extensions.x + 0.02f;
+                margin_z = world->bodies[i].half_extensions.z + 0.02f;
+            } else if (world->bodies[i].type == object_cylinder) {
+                /* Cylinder axle along X, so X margin is half_length, Z margin is radius */
+                margin_x = world->bodies[i].cylinder_half_length + 0.02f;
+                margin_z = world->bodies[i].radius + 0.02f;
+                /* If axle not along X (tilted), use max */
+                float alt = world->bodies[i].radius + 0.02f;
+                if (alt > margin_x) margin_x = alt;
+            } else {
+                margin_x = margin_z = world->bodies[i].radius + 0.02f;
+            }
+            float lim_x = half_w - margin_x;
+            float lim_z = half_w - margin_z;
+            if (world->bodies[i].position.x > lim_x) { world->bodies[i].position.x = lim_x; if (world->bodies[i].velocity.x > 0) world->bodies[i].velocity.x = 0; }
+            if (world->bodies[i].position.x < -lim_x) { world->bodies[i].position.x = -lim_x; if (world->bodies[i].velocity.x < 0) world->bodies[i].velocity.x = 0; }
+            if (world->bodies[i].position.z > lim_z) { world->bodies[i].position.z = lim_z; if (world->bodies[i].velocity.z > 0) world->bodies[i].velocity.z = 0; }
+            if (world->bodies[i].position.z < -lim_z) { world->bodies[i].position.z = -lim_z; if (world->bodies[i].velocity.z < 0) world->bodies[i].velocity.z = 0; }
+        }
         rigidbody_sanitize(&world->bodies[i]);
     }
 }

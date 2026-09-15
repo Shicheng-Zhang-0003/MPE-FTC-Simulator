@@ -17,6 +17,7 @@
  *     future stiffness upgrade.
  */
 #include "revolute_joint.h"
+#include "../config/mpe_config.h"
 #include <math.h>
 
 static math3 skew_symmetric(vector3 v) {
@@ -70,7 +71,14 @@ void revolute_solve(revolute_params *p, rigidbody *body_a, rigidbody *body_b, fl
     vector3 relative_velocity = vector3_subtraction(vel_b_at_anchor, vel_a_at_anchor);
 
     const float baumgarte_beta = 0.3f;
-    vector3 bias = vector3_scaling(position_error, baumgarte_beta / dt);
+    /* Scale bias by 1/solver_iterations when called inside iteration loop (16x would over-correct) */
+    float iter_scale = 1.0f;
+    if (g_cfg.timestep.solver_iterations > 0) iter_scale = 1.0f / (float)g_cfg.timestep.solver_iterations;
+    vector3 bias = vector3_scaling(position_error, (baumgarte_beta * iter_scale) / dt);
+    float bias_len = vector3_length(bias);
+    if (bias_len > g_cfg.solver.max_separation_bias) {
+        bias = vector3_scaling(vector3_normalisation(bias), g_cfg.solver.max_separation_bias);
+    }
 
     float inv_mass_sum = inv_mass_a + inv_mass_b;
     math3 K = {{{0.0f}}};
@@ -117,30 +125,25 @@ void revolute_solve(revolute_params *p, rigidbody *body_a, rigidbody *body_b, fl
     body_b->angular_velocity = vector3_addition(
         body_b->angular_velocity, math3_multiplication_vector3(body_b->inverse_inertia_system, angular_impulse));
     /* MFS_REVOLUTE_AXIS_DRIFT_FIX: Positional axis alignment correction.
-     * The existing axis alignment kills perpendicular angular velocity but
-     * doesn't correct orientation drift. This adds a Baumgarte-style correction
-     * that rotates body_b's orientation to keep its local axis aligned with
-     * body_a's local axis. Without this, wheels slowly tilt and cause erratic
-     * robot movement. */
+     * Only the wheel (body_b) is corrected; chassis (body_a) is the reference.
+     * Correcting the chassis causes NEW-07 wobble where wheel tilt rotates the 8kg chassis. */
     {
         vector3 axis_a_world = vector4_rotate_to_vector3(body_a->orientation, vector3_normalisation(p->axis_a));
         vector3 axis_b_world = vector4_rotate_to_vector3(body_b->orientation, vector3_normalisation(p->axis_a));
-        /* Axis error: cross product gives rotation vector needed to align axis_b with axis_a.
-         * Magnitude is sin(angle) ≈ angle for small angles. Direction is the rotation axis. */
         vector3 axis_error = vector3_cross(axis_a_world, axis_b_world);
         float axis_error_len_sq = vector3_length_squared(axis_error);
         if (axis_error_len_sq > 0.000001f) {
-            /* Baumgarte stabilization: apply angular velocity correction proportional to axis_error */
-            const float axis_baumgarte_beta = 0.1f; /* MFS_127: reduced from 0.2 to reduce oscillation */ /* tuning parameter */
-            vector3 axis_correction = vector3_scaling(axis_error, axis_baumgarte_beta / dt);
-            /* Compute effective angular mass for the correction */
+            const float axis_baumgarte_beta = 0.1f;
+            float iter_scale = 1.0f;
+            if (g_cfg.timestep.solver_iterations > 0) iter_scale = 1.0f / (float)g_cfg.timestep.solver_iterations;
+            vector3 axis_correction = vector3_scaling(axis_error, (axis_baumgarte_beta * iter_scale) / dt);
+            float corr_len = vector3_length(axis_correction);
+            if (corr_len > g_cfg.solver.max_separation_bias) {
+                axis_correction = vector3_scaling(vector3_normalisation(axis_correction), g_cfg.solver.max_separation_bias);
+            }
             math3 angular_mass = math3_addition(body_a->inverse_inertia_system, body_b->inverse_inertia_system);
             math3 angular_mass_inv = math3_inverse(angular_mass);
             vector3 axis_impulse = vector3_scaling(math3_multiplication_vector3(angular_mass_inv, axis_correction), -1.0f);
-            /* Apply angular impulse to both bodies */
-            /* MFS_201_NEW07: Only correct the wheel (body_b).
-             * The chassis (body_a) is the reference body and must not rotate
-             * to accommodate wheel tilt. */
             if (!body_b->static_state) {
                 body_b->angular_velocity = vector3_addition(
                     body_b->angular_velocity,

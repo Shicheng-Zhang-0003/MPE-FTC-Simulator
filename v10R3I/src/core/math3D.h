@@ -167,8 +167,13 @@ static inline math3 math3_inverse(math3 matrix) {
          (matrix.matrix[1][0] * matrix.matrix[2][2] - matrix.matrix[1][2] * matrix.matrix[2][0])) +
         (matrix.matrix[0][2] * (matrix.matrix[1][0] * matrix.matrix[2][1] - matrix.matrix[1][1] * matrix.matrix[2][0]));
     if ((!isfinite(determinant)) || (fabsf(determinant) < 1e-12f) /* MPE_FTC_093g: smaller epsilon for small inertia tensors */) {
-        math3 singular_matrix = {{{0.0f}}};
-        return singular_matrix;
+        /* Damped fallback: return scaled identity to avoid zero impulse that hides joint failure.
+         * Small epsilon prevents singular K (e.g., chassis 8kg vs wheel 0.2kg) from killing constraints. */
+        math3 fallback = {{{0.0f}}};
+        fallback.matrix[0][0] = 1e-4f;
+        fallback.matrix[1][1] = 1e-4f;
+        fallback.matrix[2][2] = 1e-4f;
+        return fallback;
     }
     float inverse_determinant = 1.0f / determinant;
     math3 result_matrix;

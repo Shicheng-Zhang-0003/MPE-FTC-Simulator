@@ -247,12 +247,11 @@ static void test_motor_free_speed(void) {
 /* ------------------------------------------------------------------
 * Test 7: Motor stall torque — motor reaches stall torque
 *
-* MFS_312B: the spec triplet {2.55 N·m stall, 220 RPM free, 17 A stall}
-* is not self-consistent: SI requires Kt = ke, so with free speed 220 RPM
-* at 12.8 V the stall torque must be ke·Is·η·G =
-* (12.8/(220/60·2π·30))·17·0.85·30 ≈ 8.03 N·m. We assert the value the
-* (now energy-conserving) model actually reaches.
-* ------------------------------------------------------------------ */
+ * MFS_312B: the spec triplet {2.55 N·m stall, 220 RPM free, 17 A stall}
+ * is not self-consistent if Ke==Kt. The MFS_318 fix splits Kt (from stall)
+ * and Kv (from free) to match both datasheet numbers simultaneously,
+ * sacrificing SI equality but matching published specs.
+ * ------------------------------------------------------------------ */
 static void test_motor_stall_torque(void) {
     printf("--- Test 7: Motor Stall Torque ---\n");
     motor mot;
@@ -263,12 +262,12 @@ static void test_motor_stall_torque(void) {
     motor_update(&mot, 0.0f, DT, 12.65f);
 
     float actual_torque = mot.output_torque;
-    /* Model-consistent stall torque ≈ 8.03 N·m (see comment above) */
-    float expected_stall_torque = 8.03f;
+    /* Spec stall torque for 30:1 is 2.55 N·m; model now matches spec via Kt split */
+    float expected_stall_torque = 2.55f;
     printf("    [DIAG] t7: actual_stall_torque=%.4f expected=%.2f current=%.2f\n",
            actual_torque, expected_stall_torque, mot.current);
     float torque_error = fabsf(actual_torque - expected_stall_torque) / expected_stall_torque;
-    TEST_ASSERT(torque_error < 0.3f, "motor output torque ≈ model stall torque (8.03 N·m)");
+    TEST_ASSERT(torque_error < 0.3f, "motor output torque ≈ spec stall torque (2.55 N·m)");
 
     physics_world world;
     physics_world_init(&world);
