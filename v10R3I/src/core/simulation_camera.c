@@ -67,11 +67,21 @@ void simulation_camera_tick(float frame_delta_time) {
         if (main_inputs.shift_key_pressed) {
             main_camera_fov.position.y -= debug_speed;
         }
+        /* Safety: if no vertical keys pressed, ensure no residual vertical velocity */
+        if (!main_inputs.space_key_pressed && !main_inputs.shift_key_pressed) {
+            main_camera_fov.vertical_velocity = 0.0f;
+        }
         float ijkl_speed = g_cfg.camera.ijkl_speed * frame_delta_time;
         if (main_inputs.i_key_pressed) { main_camera_fov.pitch += ijkl_speed; }
         if (main_inputs.k_key_pressed) { main_camera_fov.pitch -= ijkl_speed; }
         if (main_inputs.j_key_pressed) { main_camera_fov.yaw -= ijkl_speed; }
         if (main_inputs.l_key_pressed) { main_camera_fov.yaw += ijkl_speed; }
+        
+        /* Safety: if no IJKL keys pressed, ensure no residual rotation */
+        if (!main_inputs.i_key_pressed && !main_inputs.k_key_pressed &&
+            !main_inputs.j_key_pressed && !main_inputs.l_key_pressed) {
+            /* Pitch/yaw already stable - no velocity to clear */
+        }
     }
 
     /* Pitch clamp */
@@ -86,6 +96,14 @@ void simulation_camera_tick(float frame_delta_time) {
             main_camera_fov.horizontal_velocity.x * horizontal_friction * frame_delta_time;
         main_camera_fov.horizontal_velocity.z -=
             main_camera_fov.horizontal_velocity.z * horizontal_friction * frame_delta_time;
+        
+        /* Safety: if no movement keys pressed, zero horizontal velocity immediately */
+        if (!main_inputs.w_key_pressed && !main_inputs.a_key_pressed &&
+            !main_inputs.s_key_pressed && !main_inputs.d_key_pressed) {
+            main_camera_fov.horizontal_velocity.x = 0.0f;
+            main_camera_fov.horizontal_velocity.z = 0.0f;
+        }
+        
         main_camera_fov.position.x += main_camera_fov.horizontal_velocity.x * frame_delta_time;
         main_camera_fov.position.z += main_camera_fov.horizontal_velocity.z * frame_delta_time;
         main_camera_fov.vertical_velocity += g_cfg.world.gravity * frame_delta_time;
