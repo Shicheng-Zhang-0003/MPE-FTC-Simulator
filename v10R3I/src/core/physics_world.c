@@ -274,8 +274,11 @@ void physics_world_step(physics_world *world, float dt) {
         constraint_solve_all(world->bodies, world->body_count, dt);
     }
 
-    /* MFS_150_WHEEL_LOCK: torque-based lock for idle mecanum wheels.
-     * Replaces velocity snap with a brake torque opposing axle spin, limited to I*ω/dt. */
+    /* MFS_150_WHEEL_LOCK: torque-based lock for idle MECANUM wheels only.
+     * Replaces velocity snap with a brake torque opposing axle spin, limited to I*ω/dt.
+     * Mecanum wheels: brake on AXLE axis only (prevents forward/back creep).
+     * Free-slide axis is handled by anisotropic friction (near-zero mu).
+     * Regular wheels use rolling friction (rb_integrate_velocity) instead. */
     for (int i = 0; i < world->body_count; i++) {
         rigidbody *rb = &world->bodies[i];
         if (rb->is_mecanum && !rb->driven_this_tick) {
@@ -286,8 +289,9 @@ void physics_world_step(physics_world *world, float dt) {
             float axle_omega = vector3_dot(rb->angular_velocity, axle);
             float thresh = g_cfg.solver.wheel_lock_omega_thresh;
             if (thresh <= 0.0f) thresh = 1.5f;
+            /* Mecanum wheels: use same threshold as default to catch idle creep up to ~1.5 rad/s */
             if (fabsf(axle_omega) < thresh && fabsf(axle_omega) > 0.001f) {
-                float brake_tau = 0.12f;
+                float brake_tau = 0.08f; /* softer for mecanum */
                 float eff_I = rb->inertia_tensor_local.matrix[0][0];
                 if (eff_I < 0.0001f) eff_I = 0.000625f;
                 float max_tau = fabsf(axle_omega) * eff_I / dt;
@@ -312,8 +316,11 @@ void physics_world_step(physics_world *world, float dt) {
     for (int i = 0; i < world->body_count; i++) {
         rb_integrate_position(&world->bodies[i], dt);
         /* Hard clamp to field bounds to prevent tunneling without CCD.
-         * Clamp X/Z so body edge stays inside wall. Y not clamped here (floor handles it). */
-        if (!world->bodies[i].static_state) {
+         * Clamp X/Z so body edge stays inside wall. Y not clamped here (floor handles it).
+         * Skip mecanum wheels (robot wheels) -- their position is constrained by revolute
+         * joints to the chassis, and clamping them directly fights the joint, causing
+         * the chassis to stop prematurely ("invisible wall" symptom). */
+        if (!world->bodies[i].static_state && !world->bodies[i].is_mecanum) {
             float half_w = 1.8288f;
             float margin_x = 0.1f, margin_z = 0.1f;
             if (world->bodies[i].type == object_cube) {
