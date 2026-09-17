@@ -60,11 +60,27 @@ static void overlay_append_overflow_text(char *buffer, size_t buffer_size) {
 static bool overlay_has_valid_selection(void) {
     return (selected_object >= 0) && (selected_object < (physics_world_get_primary()->body_count));
 }
+/* FIX_TEXT_VIS: force light text on overlay labels. They render directly
+ * over the dark 3D scene with no themed background behind them, so the
+ * theme foreground (black on Windows/lighter themes) is unreadable.
+ * Per-widget provider at USER+1 beats every theme. */
+static void force_light_text(GtkWidget *widget) {
+    GtkCssProvider *prov = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(prov,
+        "* { color: #E8EEF7; text-shadow: 0 0 4px rgba(0,0,0,1), "
+        "0 1px 3px rgba(0,0,0,1); }", -1, NULL);
+    gtk_style_context_add_provider(
+        gtk_widget_get_style_context(widget),
+        GTK_STYLE_PROVIDER(prov),
+        GTK_STYLE_PROVIDER_PRIORITY_USER + 1);
+    g_object_unref(prov);
+}
 GtkWidget *overlay_initialise(GtkWidget *gl_drawing_area_widget) {
     //Debug Info
     GtkWidget *ui_overlay_container = gtk_overlay_new();
     gtk_container_add(GTK_CONTAINER(ui_overlay_container), gl_drawing_area_widget);
     debug_information_label = gtk_label_new("");
+    force_light_text(debug_information_label); /* FIX_TEXT_VIS */
     /* Versioned at runtime: never hardcode the tree version in display text. */
     {
         char version_header[64];
@@ -76,30 +92,35 @@ GtkWidget *overlay_initialise(GtkWidget *gl_drawing_area_widget) {
     gtk_overlay_add_overlay(GTK_OVERLAY(ui_overlay_container), debug_information_label);
     //Crosshair
     crosshair_label = gtk_label_new("+");
+    force_light_text(crosshair_label); /* FIX_TEXT_VIS */
     gtk_widget_set_halign(crosshair_label, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(crosshair_label, GTK_ALIGN_CENTER);
     gtk_overlay_add_overlay(GTK_OVERLAY(ui_overlay_container), crosshair_label);
     gtk_widget_show(crosshair_label);
     //Combined menu
     menu_label = gtk_label_new("");
+    force_light_text(menu_label); /* FIX_TEXT_VIS */
     gtk_widget_set_halign(menu_label, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(menu_label, GTK_ALIGN_CENTER);
     gtk_overlay_add_overlay(GTK_OVERLAY(ui_overlay_container), menu_label);
     gtk_widget_hide(menu_label);
     //Totoal spawner characteristics menu
     spawner_menu_label = gtk_label_new("");
+    force_light_text(spawner_menu_label); /* FIX_TEXT_VIS */
     gtk_widget_set_halign(spawner_menu_label, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(spawner_menu_label, GTK_ALIGN_CENTER);
     gtk_overlay_add_overlay(GTK_OVERLAY(ui_overlay_container), spawner_menu_label);
     gtk_widget_hide(spawner_menu_label);
     //Spawn Velocity Change
     velocity_menu_label = gtk_label_new("");
+    force_light_text(velocity_menu_label); /* FIX_TEXT_VIS */
     gtk_widget_set_halign(velocity_menu_label, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(velocity_menu_label, GTK_ALIGN_CENTER);
     gtk_overlay_add_overlay(GTK_OVERLAY(ui_overlay_container), velocity_menu_label);
     gtk_widget_hide(velocity_menu_label);
     //Object Individual Menu
     object_menu_label = gtk_label_new("");
+    force_light_text(object_menu_label); /* FIX_TEXT_VIS */
     gtk_widget_set_halign(object_menu_label, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(object_menu_label, GTK_ALIGN_CENTER);
     gtk_overlay_add_overlay(GTK_OVERLAY(ui_overlay_container), object_menu_label);
@@ -107,6 +128,7 @@ GtkWidget *overlay_initialise(GtkWidget *gl_drawing_area_widget) {
 
     /* MPE_TASK_35_CONFIG_MENU_LABEL_BEGIN */
     config_menu_label = gtk_label_new("");
+    force_light_text(config_menu_label); /* FIX_TEXT_VIS */
     gtk_widget_set_halign(config_menu_label, GTK_ALIGN_CENTER);
     gtk_widget_set_valign(config_menu_label, GTK_ALIGN_CENTER);
     gtk_overlay_add_overlay(GTK_OVERLAY(ui_overlay_container), config_menu_label);
@@ -173,7 +195,8 @@ void overlay_update(void) {
                     spawn_type_text = "Cylinder";
                 }
                 snprintf(spawner_text, sizeof(spawner_text),
-                         "-- Spawner Menu --\n1: Sphere\n2: Cube\n3: Current Type: %s\n4: Cylinder", spawn_type_text);
+                         "-- Spawner Menu --\n1: Sphere\n2: Cube\n3: Current Type: %s\n4: Cylinder\n5: FTC Robot",
+                         spawn_type_text);
             } else if (main_inputs.spawner_menu_level == 2) {
                 snprintf(spawner_text, sizeof(spawner_text), "-- Sphere Settings --\n1: Mass\n2: Radius");
             } else if (main_inputs.spawner_menu_level == 3) {

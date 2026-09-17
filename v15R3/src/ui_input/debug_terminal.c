@@ -100,7 +100,10 @@ static void term_append_with_tag(const char *tag_name, const char *text) {
     if (tag_name) {
         gtk_text_buffer_insert_with_tags_by_name(terminal_output_buffer, &end_iter, text, -1, tag_name, NULL);
     } else {
-        gtk_text_buffer_insert(terminal_output_buffer, &end_iter, text, -1);
+        /* FIX_TEXT_VIS: untagged output used the theme base color (black on
+         * Windows dark setups = invisible on our dark textview). Route it
+         * through the explicit light "term_normal" tag instead. */
+        gtk_text_buffer_insert_with_tags_by_name(terminal_output_buffer, &end_iter, text, -1, "term_normal", NULL);
     }
     term_scroll_to_bottom();
 }
@@ -646,6 +649,7 @@ void debug_terminal_open(GtkWidget *parent_window) {
     gtk_text_buffer_create_tag(terminal_output_buffer, "term_ok", "foreground", "#8be28b", NULL);
     gtk_text_buffer_create_tag(terminal_output_buffer, "term_err", "foreground", "#ff7b72", NULL);
     gtk_text_buffer_create_tag(terminal_output_buffer, "term_dim", "foreground", "#5f7387", NULL);
+    gtk_text_buffer_create_tag(terminal_output_buffer, "term_normal", "foreground", "#cdd6e4", NULL);
     gtk_container_add(GTK_CONTAINER(scrolled_window), terminal_output_view);
     GtkWidget *input_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
     gtk_box_pack_start(GTK_BOX(root_box), input_box, FALSE, FALSE, 0);
@@ -661,6 +665,37 @@ void debug_terminal_open(GtkWidget *parent_window) {
             mouse_lock_disable(parent_window);
         }
         main_inputs.is_mouse_locked = false;
+    }
+    /* FIX_TEXT_VIS: per-widget light-text CSS at USER+1. The screen-level
+     * theme above loses to aggressive (Windows) theme engines, leaving
+     * black-on-dark text entry/output. This beats every theme. */
+    {
+        GtkCssProvider *term_prov = gtk_css_provider_new();
+        gtk_css_provider_load_from_data(term_prov,
+            "* { color: #CDD6E4; caret-color: #FFCF87; }", -1, NULL);
+        if (terminal_output_view) {
+            gtk_style_context_add_provider(
+                gtk_widget_get_style_context(terminal_output_view),
+                GTK_STYLE_PROVIDER(term_prov),
+                GTK_STYLE_PROVIDER_PRIORITY_USER + 1);
+        }
+        if (terminal_entry) {
+            gtk_style_context_add_provider(
+                gtk_widget_get_style_context(terminal_entry),
+                GTK_STYLE_PROVIDER(term_prov),
+                GTK_STYLE_PROVIDER_PRIORITY_USER + 1);
+        }
+        if (terminal_prompt_label) {
+            GtkCssProvider *prompt_prov = gtk_css_provider_new();
+            gtk_css_provider_load_from_data(prompt_prov,
+                "* { color: #FFCF87; }", -1, NULL);
+            gtk_style_context_add_provider(
+                gtk_widget_get_style_context(terminal_prompt_label),
+                GTK_STYLE_PROVIDER(prompt_prov),
+                GTK_STYLE_PROVIDER_PRIORITY_USER + 1);
+            g_object_unref(prompt_prov);
+        }
+        g_object_unref(term_prov);
     }
     gtk_widget_show_all(terminal_window);
     term_update_prompt();

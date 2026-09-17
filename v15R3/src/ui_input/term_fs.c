@@ -150,7 +150,16 @@ void cmd_touch(int argc, char **argv) {
             continue;
         }
     if ((argc > 1) && (strstr(argv[1], "robot"))) {
-        term_err("mpe: touch: unknown type 'robot' (types: sph, cube, cyl)\n");
+        /* FTC robot spawn (was rejected as unknown type; the registry +
+         * gamepad drive path exists but had no UI entry point). */
+        int robot_index = gui_robot_spawn(0.0f, ftc_robot_rest_height(), 0.0f, MOTOR_GB_5203_30);
+        if (robot_index < 0) {
+            term_err("mpe: touch robot: spawn failed (max robots, no world, or no capacity)\n");
+            return;
+        }
+        term_printf("term_ok", "/robot/%d created at (0.0, %.2f, 0.0) motor=GB5203-30:1\n",
+                    robot_index, ftc_robot_rest_height());
+        term_dim("Drive with gamepad: left stick drive/strafe, right stick X rotate.\n");
         return;
     }
 

@@ -57,6 +57,7 @@ KNOWN_TESTS = [
     "ftc_tank_turn",
     "ftc_odometry",
     "ftc_stress",
+    "ftc_registry",
 ]
 
 # Tests that encode desired future behavior but are currently expected
