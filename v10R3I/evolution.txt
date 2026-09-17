@@ -1,4 +1,0 @@
-MFS Evolution:
-
-Stage 1:
-    v10R3I --> Derived from MPE v15R3 series
