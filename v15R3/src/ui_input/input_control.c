@@ -151,6 +151,8 @@ if (input_state -> is_menu_open) {
         if (event -> keyval == GDK_KEY_2) {input_state -> spawner_menu_level = 5;}
         if (event -> keyval == GDK_KEY_3) {input_state -> spawner_menu_level = 8;}
         if (event -> keyval == GDK_KEY_4) {input_state -> spawner_menu_level = 9;}
+        /* FTC robot spawn (key 5 is unbound at this menu level). */
+        if (event -> keyval == GDK_KEY_5) {gui_robot_spawn(0.0f, ftc_robot_rest_height(), 0.0f, MOTOR_GB_5203_30);}
     } else if (input_state -> spawner_menu_level == 2) {
         if (event -> keyval == GDK_KEY_1) {input_state -> spawner_menu_level = 3;}
         if (event -> keyval == GDK_KEY_2) {input_state -> spawner_menu_level = 4;}

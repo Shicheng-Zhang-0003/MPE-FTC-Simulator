@@ -249,6 +249,10 @@ build_ftc_stress: tests/ftc_stress_test.c $(FTC_TEST_CORE)
 	$(CC) $(CFLAGS) -Dmpe_ftc_stress_test tests/ftc_stress_test.c $(FTC_TEST_CORE) -lm -o test_ftc_stress
 test_ftc_stress: build_ftc_stress
 	./test_ftc_stress
+build_ftc_registry: tests/ftc_registry_test.c $(FTC_TEST_CORE) robotics/gui_robot_registry.c
+	$(CC) $(CFLAGS) -Dmpe_ftc_registry_test tests/ftc_registry_test.c $(FTC_TEST_CORE) robotics/gui_robot_registry.c -lm -o test_ftc_registry
+test_ftc_registry: build_ftc_registry
+	./test_ftc_registry
 
 .PHONY: clean build_two_world test_two_world build_revolute test_revolute \
 	build_cylinder_drop test_cylinder_drop build_driven_wheel test_driven_wheel \
@@ -264,4 +268,7 @@ test_ftc_stress: build_ftc_stress
 	build_friction_stop test_friction_stop build_stack test_stack \
 	build_f10_long_run test_f10_long_run build_sleep_contact_wake test_sleep_contact_wake \
 	build_f11_torture test_f11_torture \
-	build_frustum test_frustum
+	build_frustum test_frustum \
+	build_ftc_teleop test_ftc_teleop build_ftc_mecanum test_ftc_mecanum \
+	build_ftc_tank_turn test_ftc_tank_turn build_ftc_odometry test_ftc_odometry \
+	build_ftc_stress test_ftc_stress build_ftc_registry test_ftc_registry

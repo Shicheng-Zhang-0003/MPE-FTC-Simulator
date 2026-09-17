@@ -19,6 +19,14 @@ int gui_robot_spawn(float x, float y, float z, motor_preset_id preset) {
     if (!mfs_gui_robot_world) mfs_gui_robot_world = physics_world_get_primary();
     if (!mfs_gui_robot_world) return -1;
     if (!mfs_gui_robot_world->bodies) physics_world_init(mfs_gui_robot_world);
+    /* FTC field walls once per session (not per robot: add_boundary_walls is
+     * not idempotent). Without the field the robot drives to infinity;
+     * without grippy floor config the mecanum grip clamps to validation-ice.
+     * Wall failure is non-fatal: the robot still spawns. */
+    static bool field_ready = false;
+    if (!field_ready) {
+        if (ftc_ensure_field_walls(mfs_gui_robot_world) == 0) field_ready = true;
+    }
     ftc_robot *robot = &mfs_gui_robots[mfs_gui_robot_count];
     int rc = ftc_robot_create(mfs_gui_robot_world, robot, x, y, z, preset);
     if (rc != 0) return -1;
