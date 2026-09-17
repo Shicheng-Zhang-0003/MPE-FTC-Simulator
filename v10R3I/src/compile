@@ -1,6 +1,0 @@
-make clean
-if ! make -j"$(nproc)"; then
-    echo "Build failed!" >&2
-    exit 1
-fi
-echo "Build complete."

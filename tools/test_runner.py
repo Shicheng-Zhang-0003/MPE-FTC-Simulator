@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """
-MPE Test Runner
-================
+MPE + FTC Test Runner
+======================
 Discovers, builds, and runs all headless tests. Generates a summary report.
+
+FTC robotics live in v15R3/src/robotics (transplanted, physics-fixed);
+stale pre-transplant copies remain parked in v15R3/robotics_backup.
 
 Usage:
     python tools/test_runner.py              # Run all tests
@@ -17,33 +20,50 @@ from pathlib import Path
 from typing import Optional
 
 
-SRC_DIR = Path(__file__).resolve().parent.parent / "v10R3I" / "src"
+SRC_DIR = Path(__file__).resolve().parent.parent / "v15R3" / "src"
 
 KNOWN_TESTS = [
     "two_world",
     "revolute",
-    "teleop_drive",
-    "mecanum_drive",
     "cylinder_drop",
     "driven_wheel",
     "math3_inverse",
-    "ftc_integration",
-    "physics_truth",
-    "tank_turn",
-    "odometry_accuracy",
+    "floor_collision_diag",
     "cylinder_sphere",
     "cylinder_cube",
     "cylinder_cylinder",
+    "list4_cylinder_floor",
+    "scene_roundtrip",
+    "static_hold",
+    "rolling_decay",
+    "ccd_sweep",
+    "kinematic",
+    "determinism",
+    "momentum",
+    "angmom",
+    "spring",
+    "projectile",
+    "incline_accel",
+    "pendulum",
+    "bounce_series",
+    "friction_stop",
+    "stack",
+    "f10_long_run",
+    "sleep_contact_wake",
+    "f11_torture",
+    "frustum",
+    "ftc_teleop",
+    "ftc_mecanum",
+    "ftc_tank_turn",
+    "ftc_odometry",
+    "ftc_stress",
 ]
 
 # Tests that encode desired future behavior but are currently expected
-# to fail because the corresponding physics model is not implemented yet.
-#
-# mecanum_drive currently requires real lateral/roller traction. The old
-# fake chassis-force patch made this pass but was physically dishonest.
-# It should remain XFAIL until anisotropic mecanum wheel friction exists.
+# to fail because the corresponding model is not implemented yet.
+# MPE-only run: empty. (The old mecanum_drive XFAIL moved to
+# v15R3/robotics_backup with the rest of MFS.)
 EXPECTED_FAILURES = {
-    # mecanum_drive now passes via real anisotropic roller friction (MFS_MECANUM_REAL).
 }
 
 
@@ -94,7 +114,10 @@ class TestResult:
 
 
 def build_test(name: str) -> tuple:
-    target = f"test_{name}"
+    # Build-only target: `test_<name>` also runs the test, which would
+    # conflate test failures with build failures. `build_<name>` only
+    # compiles; run_test() executes the binary separately.
+    target = f"build_{name}"
     try:
         proc = subprocess.run(
             ["make", "-j4", target],
@@ -119,8 +142,6 @@ def run_test(name: str, timeout: int = 60) -> TestResult:
         return result
 
     binary = SRC_DIR / f"test_{name}"
-    if not binary.exists():
-        binary = binary.with_suffix(".exe")
     if not binary.exists():
         result.stderr = f"Binary not found: {binary}"
         result.duration = time.monotonic() - start
