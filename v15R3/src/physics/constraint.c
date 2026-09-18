@@ -284,21 +284,17 @@ static rigidbody *find_body_by_id (rigidbody *bodies, int body_count, uint32_t i
 }
 
 /* TRUTH: per-tick id->index cache avoids O(J*B) linear scan per iteration
- * (1024*16384*64 worst). Rebuilt once per tick in pre_step; solve reuses. */
-#define CONSTRAINT_ID_CACHE_SIZE 2048
-static uint32_t s_id_cache_keys[CONSTRAINT_ID_CACHE_SIZE];
-static int s_id_cache_vals[CONSTRAINT_ID_CACHE_SIZE];
-static unsigned char s_id_cache_valid[CONSTRAINT_ID_CACHE_SIZE];
-static int s_id_cache_body_count = -1;
-static uint32_t s_id_cache_first_id = 0;
-static bool s_id_cache_ready = false;
-
-static void constraint_id_cache_rebuild(rigidbody *bodies, int body_count) {
+ * (1024*16384*64 worst). Rebuilt once per tick in pre_step; solve reuses.
+ * FIX-AUDIT: storage lives in the owning physics_world (was file-static:
+ * shared across worlds and threads). */
+static void constraint_id_cache_rebuild(struct physics_world *world, rigidbody *bodies, int body_count) {
     for (int i = 0; i < CONSTRAINT_ID_CACHE_SIZE; i++) {
-        s_id_cache_valid[i] = 0;
+        world->constraint_id_valid[i] = 0;
     }
-    if (!bodies || body_count <= 0) {
-        s_id_cache_ready = false;
+    if (!world || !bodies || body_count <= 0) {
+        if (world) {
+            world->constraint_id_ready = false;
+        }
         return;
     }
     for (int i = 0; i < body_count; i++) {
@@ -309,36 +305,37 @@ static void constraint_id_cache_rebuild(rigidbody *bodies, int body_count) {
         uint32_t h = (id * 2654435761u) & (CONSTRAINT_ID_CACHE_SIZE - 1);
         for (int probe = 0; probe < 32; probe++) {
             uint32_t s = (h + (uint32_t) probe) & (CONSTRAINT_ID_CACHE_SIZE - 1);
-            if (!s_id_cache_valid[s]) {
-                s_id_cache_keys[s] = id;
-                s_id_cache_vals[s] = i;
-                s_id_cache_valid[s] = 1;
+            if (!world->constraint_id_valid[s]) {
+                world->constraint_id_keys[s] = id;
+                world->constraint_id_vals[s] = i;
+                world->constraint_id_valid[s] = 1;
                 break;
             }
         }
     }
-    s_id_cache_body_count = body_count;
-    s_id_cache_first_id = bodies[0].object_id;
-    s_id_cache_ready = true;
+    world->constraint_id_body_count = body_count;
+    world->constraint_id_first_id = bodies[0].object_id;
+    world->constraint_id_ready = true;
 }
 
-static rigidbody *find_body_by_id_cached(rigidbody *bodies, int body_count, uint32_t id) {
-    if (!bodies || body_count <= 0 || id == 0) {
+static rigidbody *find_body_by_id_cached(struct physics_world *world, rigidbody *bodies, int body_count,
+                                         uint32_t id) {
+    if (!world || !bodies || body_count <= 0 || id == 0) {
         return NULL;
     }
-    if (!s_id_cache_ready || s_id_cache_body_count != body_count ||
-        (body_count > 0 && bodies[0].object_id != s_id_cache_first_id)) {
-        constraint_id_cache_rebuild(bodies, body_count);
+    if (!world->constraint_id_ready || world->constraint_id_body_count != body_count ||
+        (body_count > 0 && bodies[0].object_id != world->constraint_id_first_id)) {
+        constraint_id_cache_rebuild(world, bodies, body_count);
     }
-    if (s_id_cache_ready) {
+    if (world->constraint_id_ready) {
         uint32_t h = (id * 2654435761u) & (CONSTRAINT_ID_CACHE_SIZE - 1);
         for (int probe = 0; probe < 32; probe++) {
             uint32_t s = (h + (uint32_t) probe) & (CONSTRAINT_ID_CACHE_SIZE - 1);
-            if (!s_id_cache_valid[s]) {
+            if (!world->constraint_id_valid[s]) {
                 break;
             }
-            if (s_id_cache_keys[s] == id) {
-                int idx = s_id_cache_vals[s];
+            if (world->constraint_id_keys[s] == id) {
+                int idx = world->constraint_id_vals[s];
                 if (idx >= 0 && idx < body_count && bodies[idx].object_id == id) {
                     return &bodies[idx];
                 }
@@ -361,8 +358,8 @@ static void constraint_dispatch (struct physics_world *world, float dt, bool mot
     for (int i = 0; i < mpe_max_joints; i++) {
         if (!world->revolute_constraints [i].is_active) { continue; }
         constraint *c = &world->revolute_constraints [i];
-        rigidbody *body_a = find_body_by_id_cached (bodies, body_count, c->body_id_a);
-        rigidbody *body_b = find_body_by_id_cached (bodies, body_count, c->body_id_b);
+        rigidbody *body_a = find_body_by_id_cached (world, bodies, body_count, c->body_id_a);
+        rigidbody *body_b = find_body_by_id_cached (world, bodies, body_count, c->body_id_b);
         if ((!body_a) || (!body_b)) { continue; }
         /* Island skip (solve pass only): a fully-sleeping island's joint
          * solve is a no-op. A LIVE motor (enabled, nonzero target) keeps
@@ -410,7 +407,7 @@ void constraint_pre_step_all(struct physics_world *world, float dt) {
     if ((!world) || (!world->bodies) || (world->body_count <= 0) || (!(dt > 0.0f))) {
         return;
     }
-    constraint_id_cache_rebuild(world->bodies, world->body_count);
+    constraint_id_cache_rebuild(world, world->bodies, world->body_count);
     if (world->revolute_constraint_count <= 0) {
         return;
     }
@@ -419,8 +416,8 @@ void constraint_pre_step_all(struct physics_world *world, float dt) {
             continue;
         }
         constraint *c = &world->revolute_constraints[i];
-        rigidbody *ba = find_body_by_id_cached(world->bodies, world->body_count, c->body_id_a);
-        rigidbody *bb = find_body_by_id_cached(world->bodies, world->body_count, c->body_id_b);
+        rigidbody *ba = find_body_by_id_cached(world, world->bodies, world->body_count, c->body_id_a);
+        rigidbody *bb = find_body_by_id_cached(world, world->bodies, world->body_count, c->body_id_b);
         if ((!ba) || (!bb)) {
             continue;
         }
@@ -452,8 +449,8 @@ void constraint_correct_axis_drift_all (struct physics_world *world, float dt) {
     for (int i = 0; i < mpe_max_joints; i++) {
         if (!world->revolute_constraints [i].is_active) { continue; }
         constraint *c = &world->revolute_constraints [i];
-        rigidbody *body_a = find_body_by_id_cached (bodies, body_count, c->body_id_a);
-        rigidbody *body_b = find_body_by_id_cached (bodies, body_count, c->body_id_b);
+        rigidbody *body_a = find_body_by_id_cached (world, bodies, body_count, c->body_id_a);
+        rigidbody *body_b = find_body_by_id_cached (world, bodies, body_count, c->body_id_b);
         if ((!body_a) || (!body_b)) { continue; }
         if ((!islands_body_awake (world, body_a)) && (!islands_body_awake (world, body_b))) { continue; }
         if (c->type == constraint_revolute) {
