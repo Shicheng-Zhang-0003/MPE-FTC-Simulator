@@ -21,10 +21,13 @@
 
 #define DT (1.0f / 60.0f)
 #define TICKS_FROM(s) ((int)((s) / DT))
-#define FREE_RPM 200.0f /* GB_5203_30 no-load at 12V (spec-anchored; Ke exact) */
-#define RPM_CAP 220.0f  /* free +10%: catches bang-bang (old bug hit 356+) without crying wolf */
+/* FIX-AUDIT: caps follow the motor under test (19.2:1: 312 RPM free).
+ * The old 200/220 belonged to a nonexistent "GB_5203_30" and mislabeled
+ * honest free speed as bang-bang. Cap = free +10%. */
+#define FREE_RPM 312.0f /* GB_5203_19_2 no-load at 12V (spec-anchored; Ke exact) */
+#define RPM_CAP 344.0f  /* free +10%: catches bang-bang (old bug hit 356+) without crying wolf */
 #define FIELD_LIMIT 1.55f
-#define UPRIGHT_LIMIT 0.4f
+/* Upright = chassis up.y stays above 0.9 (tips past ~25° fail). */
 /* TRUTH: brake-mode stopping from ~1 m/s takes ~1 s (BackEMF viscous tail +
  * rolling/drag Coulomb; measured). A 0.5 s window cannot show rest, so the
  * script ends with a 1.2 s all-zero coast and gates REST there; mid-run
@@ -48,7 +51,11 @@ int main(void) {
     ftc_ensure_field_walls(&world);
 
     ftc_robot robot;
-    int rc = ftc_robot_create(&world, &robot, 0.0f, ftc_robot_rest_height(), 0.0f, MOTOR_GB_5203_19_2);
+    /* FIX-AUDIT: start up-field (z=-1.0). The script's full-stick phases
+     * cover ~1.3 m per second; from origin it ended parked in the north
+     * wall (z=1.56 vs 1.55 limit — a geofence trip by 6 mm, not a
+     * controller fault). */
+    int rc = ftc_robot_create(&world, &robot, 0.0f, ftc_robot_rest_height(), -1.0f, MOTOR_GB_5203_19_2);
     if (rc != 0) {
         printf("[FAIL] could not create robot\n");
         return 1;
@@ -56,8 +63,8 @@ int main(void) {
 
     const int total = TICKS_FROM(FINAL_COAST_END);
     int fail = 0;
-    float max_rpm = 0.0f, max_speed = 0.0f, max_x = 0.0f, max_z = 0.0f, max_pitch = 0.0f, max_roll = 0.0f;
-    int t_max_roll = 0, t_max_speed = 0;
+    float max_rpm = 0.0f, max_speed = 0.0f, max_x = 0.0f, max_z = 0.0f, min_up = 1.0f;
+    int t_min_up = 0, t_max_speed = 0;
 
     float outp_count = 0; (void)outp_count;
 
@@ -167,7 +174,9 @@ int main(void) {
         if (fail) break;
 
         for (int i = 0; i < robot.wheel_count; i++) {
-            float rpm = robot.wheel_motors[i].rpm;
+            /* FIX-AUDIT: rpm telemetry is signed (direction matters);
+             * over-spin cares about magnitude. */
+            float rpm = fabsf(robot.wheel_motors[i].rpm);
             if (rpm > max_rpm) max_rpm = rpm;
         }
         float sv = vector3_length(chassis->velocity);
@@ -176,10 +185,16 @@ int main(void) {
         float cz = fabsf(chassis->position.z);
         if (cx > max_x) max_x = cx;
         if (cz > max_z) max_z = cz;
-        float pitch = fabsf(chassis->orientation.x);  /* quaternion: x-axis (pitch-ish) */
-        float roll = fabsf(chassis->orientation.y);
-        if (pitch > max_pitch) max_pitch = pitch;
-        if (roll > max_roll) { max_roll = roll; t_max_roll = t; }
+        /* FIX-AUDIT: upright = chassis up-vector, not quaternion xy. The old
+         * check read |qx|,|qy| — but qy=1.0 at 180° YAW (facing backward),
+         * so every fast turn "opened like a maraca". up.y dips only on real
+         * tip/flip. */
+        vector3 chassis_up =
+            vector4_rotate_to_vector3(chassis->orientation, (vector3){0.0f, 1.0f, 0.0f});
+        if (chassis_up.y < min_up) {
+            min_up = chassis_up.y;
+            t_min_up = t;
+        }
     }
 
     float end_x, end_y, end_z;
@@ -189,8 +204,8 @@ int main(void) {
            first_phase_dz, first_phase_dx, strafe_phase_dx, rotate_theta_increase);
     printf("[info] max rpm=%.1f (free %.0f clamp %.0f) max speed=%.2f m/s @ t=%.1fs\n",
            max_rpm, FREE_RPM, RPM_CAP, max_speed, (float)t_max_speed * DT);
-    printf("[info] extents x=%.2f z=%.2f pitch=%.3f roll=%.3f@t=%.1fs\n",
-           max_x, max_z, max_pitch, max_roll, (float)t_max_roll * DT);
+    printf("[info] extents x=%.2f z=%.2f min_up=%.3f@t=%.1fs\n",
+           max_x, max_z, min_up, (float)t_min_up * DT);
     printf("[info] end=(%.3f,%.3f,%.3f) odom_theta=%.3f\n", end_x - start_x, end_y - start_y, end_z - start_z, robot.odom_theta);
     printf("[info] smoothness peak |dv|=%.4f (steady-forward window, mean %.4f)\n",
            smooth_max_dv, (smooth_n > 1) ? smooth_sum_dv / (float)(smooth_n - 1) : 0.0f);
@@ -209,8 +224,8 @@ int main(void) {
     if (max_x > FIELD_LIMIT || max_z > FIELD_LIMIT) {
         printf("[FAIL] touched field wall (x=%.2f z=%.2f)\n", max_x, max_z); fail = 1;
     }
-    if (max_pitch > UPRIGHT_LIMIT || max_roll > UPRIGHT_LIMIT) {
-        printf("[FAIL] opened up like a maraca (pitch=%.3f roll=%.3f)\n", max_pitch, max_roll); fail = 1;
+    if (min_up < 0.9f) {
+        printf("[FAIL] opened up like a maraca (min chassis up.y=%.3f)\n", min_up); fail = 1;
     }
 
     /* 2) no wheel bang-bang / over-spin */
@@ -260,17 +275,16 @@ int main(void) {
     }
 
     /* 5) phase mappings */
-    /* TRUTH: honest 30:1 launch covers ~0.67 m in the 1 s phase; gate 0.5. */
+    /* TRUTH: honest 19.2:1 launch covers ~1.3 m in the 1 s phase; gate 0.5. */
     if (first_phase_dz < 0.5f) {
         printf("[FAIL] forward phase moved too little (dz=%.3f)\n", first_phase_dz); fail = 1;
     }
     if (fabsf(first_phase_dx) > 0.5f * fabsf(first_phase_dz)) {
         printf("[FAIL] forward phase veered off (dx=%.3f vs dz=%.3f)\n", first_phase_dx, first_phase_dz); fail = 1;
     }
-    /* Strafe runs on roller grip diagonals (mu_grip 1.0) with rollers
-     * sliding free (mu_free 0.03): measured ~0.33-0.52 m over the 0.7 s
-     * window. 0.15 clears with margin; full-range strafe lives in the
-     * mecanum test (dx > 0.8 m in 3 s). */
+    /* Strafe runs on the friction-capped chassis path with isotropic contact
+     * resistance: measured ~0.3-0.5 m over the 0.7 s window. 0.15 clears
+     * with margin; full-range strafe lives in the mecanum test. */
     if (strafe_phase_dx < 0.15f) {
         printf("[FAIL] strafe phase moved too little (+X, dx=%.3f)\n", strafe_phase_dx); fail = 1;
     }

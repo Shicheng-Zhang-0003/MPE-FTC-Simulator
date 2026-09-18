@@ -20,7 +20,9 @@ int main(void) {
     constraint_pool_init(world);
 
     int first_count = world->body_count;
-    int idx0 = gui_robot_spawn(0.0f, ftc_robot_rest_height(), 0.0f, MOTOR_GB_5203_19_2);
+    /* FIX-AUDIT: spawn robot 0 up-field (z=-1.0): the 90-tick drive below
+     * covers ~1.9 m and must not end parked against the wall. */
+    int idx0 = gui_robot_spawn(0.0f, ftc_robot_rest_height(), -1.0f, MOTOR_GB_5203_19_2);
     if (idx0 != 0) {
         printf("[FAIL] first gui_robot_spawn returned %d (want 0)\n", idx0);
         return 1;
@@ -53,7 +55,7 @@ int main(void) {
     float sx, sy, sz;
     ftc_robot_get_position(world, gui_robot_get(0), &sx, &sy, &sz);
     const float dt = 1.0f / 60.0f;
-    for (int t = 0; t < 120; t++) {
+    for (int t = 0; t < 90; t++) {
         gui_robot_apply_drive(1.0f, 0.0f, 0.0f);
         gui_robot_tick(dt);
         physics_world_step(world, dt);

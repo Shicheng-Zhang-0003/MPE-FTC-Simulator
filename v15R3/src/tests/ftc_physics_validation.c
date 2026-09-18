@@ -25,10 +25,13 @@ int main(void) {
     physics_world_init(&world);
     constraint_pool_init(&world);
 
-    /* Create FTC robot with mecanum drive */
+    /* Create FTC robot with mecanum drive.
+     * FIX-AUDIT: spawn at rest height (was y=0: chassis interpenetrated
+     * the floor and the first ~30 ticks measured drop recovery, not
+     * driving). */
     ftc_robot robot;
     memset(&robot, 0, sizeof(ftc_robot));
-    ftc_robot_create(&world, &robot, 0.0f, 0.0f, 0.0f, MOTOR_GB_5203_19_2);
+    ftc_robot_create(&world, &robot, 0.0f, ftc_robot_rest_height(), 0.0f, MOTOR_GB_5203_19_2);
 
     printf("Robot created: %d wheels, chassis=%d\n", robot.wheel_count, robot.chassis_body);
     printf("Floor friction: s=%.3f k=%.3f\n", g_cfg.world.floor_friction_s, g_cfg.world.floor_friction_k);
@@ -87,14 +90,20 @@ int main(void) {
     float final_speed = sqrtf(final_vel.x * final_vel.x + final_vel.z * final_vel.z);
     printf("  Final speed: %.6f m/s (should be ~0)\n", final_speed);
 
-    /* Test 3: Strafe drive - validate lateral traction */
+    /* Test 3: Strafe drive - validate lateral traction.
+     * FIX-AUDIT: must run the full drivetrain pipeline (drivetrain_mecanum
+     * + drivetrain_update). The old code set raw wheel commands with
+     * ftc_robot_update only: lateral force lives in drivetrain_update's
+     * chassis path (rollers can't push sideways through contact alone),
+     * so it measured nothing — and only "passed" because the robot used
+     * to spawn interpenetrated (y=0) and the drop-pop chaos exceeded the
+     * 1 cm/s bar. */
     printf("\n--- Test 3: Strafe drive (300 ticks) ---\n");
-    float strafe_cmds[4] = {0.5f, -0.5f, -0.5f, 0.5f};
-    ftc_robot_set_wheel_commands(&robot, strafe_cmds, 4);
 
     float max_strafe = 0.0f;
     for (int t = 0; t < 300; t++) {
-        ftc_robot_update(&world, &robot, FTC_DT);
+        drivetrain_mecanum(&robot, 0.0f, 0.5f, 0.0f);
+        drivetrain_update(&world, &robot, FTC_DT);
         physics_world_step(&world, FTC_DT);
 
         vector3 vel = world.bodies[robot.chassis_body].velocity;
