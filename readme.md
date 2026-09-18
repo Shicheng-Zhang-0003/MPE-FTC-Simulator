@@ -30,7 +30,7 @@ MPE is built around four priorities:
 
 ## ✨ What's New in v15R3
 
-`v15R3` is the v15 configuration-system release (MPE-only run; MFS robotics is parked in `v15R3/robotics_backup/` — see that folder's `README_PARKED.md`). Highlights:
+`v15R3` is the v15 configuration-system release with live FTC/MFS robotics in `v15R3/src/robotics/` (the `v15R3/robotics_backup/` tree is parked pre-transplant history — see that folder's `README_PARKED.md`). Highlights:
 
 - **Domain-driven architecture** — clean `core`, `physics`, `render`, `scene`, `ui_input` modules.
 - **Warm-starting contact solver** with multi-point Sutherland–Hodgman manifolds for stable stacking.
@@ -53,8 +53,8 @@ MPE is built around four priorities:
 MPE eliminates per-object draw calls using **GPU instancing**:
 
 - The CPU packs model matrices + colors into contiguous buffers.
-- The GPU batches all dynamic bodies into **two instanced draws** (spheres, cubes).
-- The grid, selection outline, and spring-joint overlay share a utility shader with cached uniform locations.
+- The GPU batches all dynamic bodies into **three instanced draws** (spheres, cubes, cylinders).
+- The grid, selection outline, spring-joint overlay, and FTC nose markers share a utility shader with cached uniform locations.
 
 ### Shading
 
@@ -80,14 +80,25 @@ Objects are mapped into hashed grid buckets; collision checks are limited to loc
 ### Solver
 
 - **Impulse-based sequential solver**, 64 iterations by default (configurable 1–128), with **warm starting**.
-- Static + kinetic friction, rolling friction, Baumgarte penetration correction.
-- Positional depenetration pass for pile stability.
+- Static + kinetic friction, rolling friction, and anisotropic mecanum-roller contact (grip axis + free roller axis, decoupled clamps).
+- Positional split-impulse + depenetration passes for pile stability (no velocity-level Baumgarte bias by design).
 
 ### Integration
 
 - **Semi-implicit (symplectic) Euler** for linear motion.
 - **Quaternion-based angular integration** (no gimbal lock).
-- **Fixed 60 Hz timestep** with an accumulator and 5-substep cap (spiral-of-death prevention).
+- **Fixed 60 Hz timestep** with an accumulator and 32-substep cap (spiral-of-death prevention).
+
+---
+
+## 🤖 MFS Robotics (FTC)
+
+A ~6 kg competition-weight mecanum robot (19.2:1 goBILDA 5203s, 96 mm wheels) simulated with no cheat forces — every newton arrives through documented physics:
+
+- **DC motor model** — stall/free-speed-derived Kt/Ke with gearbox Coulomb drag, 16× electrical subcycling, battery sag with 30 A foldback, regen-aware drain.
+- **Anisotropic roller contact** — rubber grip axis at the pair's own Coulomb μ plus a near-free roller axis (bearing drag), decoupled clamps.
+- **Honest odometry** — wheel-encoder translation (slip shows as error) + IMU-model heading.
+- **Robot-relative sticks** — right means the robot's right at any heading; an orange nose wireframe marks the +Z face, and the default camera starts behind the robot.
 
 ---
 
@@ -108,7 +119,7 @@ make mpe-tui
 ./mpe-tui                         # live ncurses inspector (needs a TTY)
 ./mpe-tui --snapshot 600          # one full state dump (pipeable, diffable)
 ./mpe-tui --stream 600 --every 60 # dumps over time
-./mpe-tui --snapshot 10 --scene tower|pendulum|springlab|f10|demo
+./mpe-tui --snapshot 10 --scene tower|pendulum|springlab|f10|ftc|demo
 ```
 
 Live screens: overview table, per-object characteristics + mathematics
@@ -151,6 +162,15 @@ sections (`[engine]`, `[body i]`, `[springs]`, `[constraints]`, `[pairs]`,
 |---|---|
 | Spawn object | Hold `Enter` |
 | Spawner settings | `8` |
+| Spawn FTC robot (19.2:1) | `8` then `5` |
+
+### Driving robots (gamepad, robot-relative)
+
+| Action | Input |
+|---|---|
+| Drive forward / strafe | Left stick |
+| Turn | Right stick X |
+| Heading marker | Orange nose cube on the robot's front face |
 
 ### Selection & Editing
 

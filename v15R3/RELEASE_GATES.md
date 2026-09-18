@@ -34,10 +34,10 @@ They should be recorded as post-stable work items.
 
 ### 2. Build
 - [X] `make clean` succeeds.
-- [X] `make` succeeds.
+- [X] `make` succeeds with zero warnings (`-Wall -Wextra`, Linux GCC and MinGW GCC).
 - [X] The engine binary is produced.
-- [X] There are no new compiler errors.
-- [X] Compiler warnings are reviewed and understood.
+- [X] There are no compiler errors.
+- [X] Windows (MSYS2 MINGW64) builds warning-free; `.exe` suffix and MSVCRT `%zu` portability handled.
 
 ### 3. Startup
 - [X] Engine starts using the documented workflow.
@@ -174,13 +174,14 @@ They should be recorded as post-stable work items.
 ## Deferred / Post-Stable Work
 
 The following are not required for `v15R3`:
-- multithreading,
 - in-engine creation UI and scene persistence for fixed/distance/prismatic/rope
   (solver supports all five constraint types + springs; menus persist
   springs + revolutes),
 - complete UI state-machine rewrite,
 - Wayland mouse-lock support,
 - per-object config persistence in scene files.
+- [X] Threading: physics steps on a worker thread, UI mutates under a world
+  mutex (no torn reads/races); headless tests are single-threaded.
 
 Completed since this list was written (no longer deferred): full
 global-state removal (sim state is per-world), `PhysicsWorld`
@@ -222,7 +223,7 @@ If any mandatory gate fails, the correct action is:
 
 ### Release verdict (v15R3, tagged)
 
-All P0 gates pass: clean build with zero new errors, 36/36 headless green,
+All P0 gates pass: clean build with zero warnings, 36/36 headless green,
 `tui-smoke` green, F10 settle verdict green (headless 3600-tick equivalent
 plus committed `f10_long_run`), F11 robustness green in-engine and headless
 (`f11_torture`). P1 known limitations are documented in

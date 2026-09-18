@@ -61,6 +61,7 @@ The active spawn type (sphere, cube, or cylinder) is shown in the status bar. To
     1 → Mass
     2 → Radius
     3 → Half-length (axle, local X)
+  5 → Spawn FTC mecanum robot (19.2:1, at origin)
 ```
 
 Each leaf option opens a text input dialog where you type the value directly and press OK.
@@ -95,6 +96,21 @@ E → Object Menu
 ```
 
 Mass, radius, and friction open a text input dialog. Immovable objects have zero inverse mass — forces and collisions do not move them, making them useful as static walls or floors.
+
+---
+
+## Driving FTC robots
+
+Press `8` then `5` (or `touch robot` in the debug terminal) to spawn a ~6 kg competition-weight mecanum robot (19.2:1 goBILDA 5203s, 96 mm wheels, 12 ft field walls included). Drive with a gamepad (F310, X mode):
+
+| Input | Action (robot-relative) |
+|---|---|
+| Left stick | Forward / strafe (right = robot's right) |
+| Right stick X | Turn (right = clockwise) |
+
+Controls are robot-relative at any heading, and an orange nose wireframe marks the +Z front face. The camera starts behind the robot; mouse-look stays free.
+
+Model truth (no cheat forces): DC motors with gearbox drag and battery sag, anisotropic roller contact (rubber grip + free roller axes), wheel-encoder translation odometry with IMU-model heading. Headless proof: `ftc_teleop/mecanum/tank_turn/odometry/stress/registry/physics_validation` via `python3 tools/test_runner.py`.
 
 ---
 
@@ -152,7 +168,7 @@ make mpe-tui
 ./mpe-tui                         # live ncurses inspector (needs a TTY)
 ./mpe-tui --snapshot 600          # one full state dump (pipeable, diffable)
 ./mpe-tui --stream 600 --every 60 # dumps every 60 ticks
-./mpe-tui --snapshot 10 --scene tower|pendulum|springlab|f10|demo
+./mpe-tui --snapshot 10 --scene tower|pendulum|springlab|f10|ftc|demo
 ```
 
 Live screens (`1`–`5`, `Tab` cycles): body overview, per-object
@@ -306,7 +322,7 @@ All values are in SI units (metres, kilograms, seconds).
 | Air drag coefficient | 0.99 | — |
 | Physics timestep | 60 Hz fixed | — |
 
-The engine uses a fixed 60 Hz physics timestep with an accumulator, allowing up to 5 physics ticks per rendered frame to prevent spiral-of-death. Each physics tick runs 64 sequential-impulse solver iterations by default (timestep.solver_iterations, 1–128), giving stable collision resolution for stacked objects and rolling behaviour. Rolling resistance applies contact-patch torque (Hertz patch, shared-patch split for body-body); static/kinetic Coulomb friction uses a two-tangent disc clamp.
+The engine uses a fixed 60 Hz physics timestep (decoupled physics thread); oversized steps subdivide with a 32-substep cap to prevent spiral-of-death. Each physics tick runs 64 sequential-impulse solver iterations by default (timestep.solver_iterations, 1–128), giving stable collision resolution for stacked objects and rolling behaviour. Rolling resistance applies contact-patch torque (Hertz patch, shared-patch split for body-body); static/kinetic Coulomb friction uses a two-tangent disc clamp (anisotropic grip/roller frame on mecanum wheels).
 
 Objects with velocity below 0.05 m/s and angular velocity below 0.01 rad/s are put to sleep automatically to prevent floating-point jitter.
 
@@ -371,6 +387,18 @@ Run:
 ./engine
 ```
 
-The engine has been tested on Ubuntu 24.04.4 LTS. Intel MacOS users may attempt to install the same dependencies via Homebrew, but this is unsupported. Windows is not supported.
+The engine has been tested on Ubuntu 24.04.4 LTS. Intel MacOS users may attempt to install the same dependencies via Homebrew, but this is unsupported.
+
+## Windows (MSYS2 MINGW64, supported)
+
+```bash
+pacman -S mingw-w64-x86_64-toolchain mingw-w64-x86_64-gtk3 mingw-w64-x86_64-libepoxy mingw-w64-x86_64-ncurses mingw-w64-x86_64-python
+cd v15R3/src
+make
+./engine.exe
+python3 ../../tools/test_runner.py   # 36/36 green incl. FTC; needs .exe-aware runner (shipped)
+```
+
+Notes: MSYS2 ships only the `ncursesw` pkg-config variant (the makefile accepts either); `%zu` printf conversions are avoided tree-wide for MSVCRT. Locked-down boxes may transiently refuse freshly linked test binaries (Smart App Control reputation) — re-run reds once.
 
 For release validation, follow [RELEASE_GATES.md](RELEASE_GATES.md) and the scripts in `validation/`.
