@@ -68,10 +68,14 @@ TUI_FTC_CORE := robotics/motor.c robotics/motor_presets.c robotics/battery.c rob
 TUI_CORE = $(MPE_TEST_CORE) $(SPRING_TEST_SRCS) $(TUI_FTC_CORE)
 # WIN_PORT: look ncurses up lazily (=, not :=) so `make clean`, `make engine`
 # and the headless tests never require it. Only the mpe-tui target does.
+# TUI_CFLAGS carries the header path: MSYS2 installs ncurses headers into a
+# versioned subdir (include/ncursesw), so <ncurses.h> needs the pkg-config
+# cflags — Linux works without them only because they sit top-level there.
+TUI_CFLAGS = $(shell pkg-config --cflags ncursesw 2>/dev/null || pkg-config --cflags ncurses 2>/dev/null)
 TUI_LIBS = -lm $(shell pkg-config --libs ncursesw 2>/dev/null || pkg-config --libs ncurses 2>/dev/null) $(shell pkg-config --libs epoxy 2>/dev/null)
 build_tui: $(TUI_SRCS) $(TUI_CORE)
 	@if ! pkg-config --exists ncursesw 2>/dev/null && ! pkg-config --exists ncurses 2>/dev/null; then echo "error: mpe-tui needs ncurses (neither ncursesw nor ncurses found):"; echo "  MSYS2 MINGW64: pacman -S mingw-w64-x86_64-ncurses"; echo "  Debian/Ubuntu: sudo apt install libncurses-dev"; exit 1; fi
-	$(CC) $(CFLAGS) -Dmpe_tui_main $(TUI_SRCS) $(TUI_CORE) $(TUI_LIBS) -o mpe-tui
+	$(CC) $(CFLAGS) $(TUI_CFLAGS) -Dmpe_tui_main $(TUI_SRCS) $(TUI_CORE) $(TUI_LIBS) -o mpe-tui
 mpe-tui: build_tui
 tui-smoke: build_tui
 	./mpe-tui --snapshot 60 --scene demo > /dev/null
