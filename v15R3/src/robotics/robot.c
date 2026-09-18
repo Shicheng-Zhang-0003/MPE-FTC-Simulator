@@ -27,14 +27,29 @@ float ftc_robot_rest_height(void) {
     return WHEEL_RADIUS - WHEEL_Y_OFFSET;
 }
 
+/* FIX-AUDIT: index slots where 0 is a valid body/joint must never read 0
+ * for "empty" after memset. Central reset keeps the sentinel invariant
+ * (wheel_joints/bodies/chassis = -1) at every init and failure exit. */
+static void ftc_robot_invalidate(ftc_robot *robot) {
+    memset(robot, 0, sizeof(ftc_robot));
+    for (int s_i = 0; s_i < FTC_MAX_WHEELS; s_i++) {
+        robot->wheel_joints[s_i] = -1;
+        robot->wheel_bodies[s_i] = -1;
+    }
+    robot->chassis_body = -1;
+}
+
 int ftc_robot_create_with_drive(physics_world *world, ftc_robot *robot, float x, float y, float z,
                                 motor_preset_id preset, ftc_drivetrain_type drivetrain_type) {
 /* MFS_161_NULL_FIX: null-check FIRST, before any dereference */
 if ((!world) || (!robot)) {
 return 1;
 }
-memset(robot, 0, sizeof(ftc_robot));
-/* memset zeroes odom_x/z/theta and wheel_radians — no separate init needed */
+/* FIX-AUDIT: joint/body slots are indices where 0 is VALID. memset leaves
+ * 0, so a mid-spawn failure rollback (`>= 0`) used to remove constraint 0
+ * (an unrelated joint). ftc_robot_invalidate zeroes scalars (odom, radians)
+ * and sentinels the slots to -1. */
+ftc_robot_invalidate(robot);
 /* MFS_302C_CAPACITY: Pre-check capacity before creating anything. */
 if (world->body_count + 5 > world->body_capacity) {
 return 1;
@@ -55,12 +70,16 @@ return 1;
 
     uint32_t chassis_id = world->bodies[robot->chassis_body].object_id;
 
-    /* 4 wheels at corners */
+    /* 4 wheels at corners.
+     * FIX-AUDIT: front is +Z (was -Z with a "+Z forward" comment, so
+     * full stick drove the robot back-first and stick-up meant reverse).
+     * Indices stay [0]=FL,[1]=FR,[2]=BL,[3]=BR; roller X-pattern per index
+     * is unchanged, only the Z side moved. */
     float wheel_positions[4][3] = {
-        {x - WHEEL_OFFSET_X, y + WHEEL_Y_OFFSET, z - WHEEL_OFFSET_Z}, /* front-left */
-        {x + WHEEL_OFFSET_X, y + WHEEL_Y_OFFSET, z - WHEEL_OFFSET_Z}, /* front-right */
-        {x - WHEEL_OFFSET_X, y + WHEEL_Y_OFFSET, z + WHEEL_OFFSET_Z}, /* back-left */
-        {x + WHEEL_OFFSET_X, y + WHEEL_Y_OFFSET, z + WHEEL_OFFSET_Z}, /* back-right */
+        {x - WHEEL_OFFSET_X, y + WHEEL_Y_OFFSET, z + WHEEL_OFFSET_Z}, /* front-left */
+        {x + WHEEL_OFFSET_X, y + WHEEL_Y_OFFSET, z + WHEEL_OFFSET_Z}, /* front-right */
+        {x - WHEEL_OFFSET_X, y + WHEEL_Y_OFFSET, z - WHEEL_OFFSET_Z}, /* back-left */
+        {x + WHEEL_OFFSET_X, y + WHEEL_Y_OFFSET, z - WHEEL_OFFSET_Z}, /* back-right */
     };
     robot->wheel_count = 4;
 
@@ -78,7 +97,7 @@ for (int rb_i = 0; rb_i < i; rb_i++) {
 if (robot->wheel_joints[rb_i] >= 0)
 constraint_remove(world, robot->wheel_joints[rb_i]);
 }
-memset(robot, 0, sizeof(ftc_robot));
+ftc_robot_invalidate(robot);
 return 1;
         }
         robot->wheel_bodies[i] = added;
@@ -101,7 +120,7 @@ for (int rb_i = 0; rb_i <= i; rb_i++) {
 if (robot->wheel_joints[rb_i] >= 0)
 constraint_remove(world, robot->wheel_joints[rb_i]);
 }
-memset(robot, 0, sizeof(ftc_robot));
+ftc_robot_invalidate(robot);
 return 1;
         }
 
@@ -171,22 +190,29 @@ void ftc_robot_update(physics_world *world, ftc_robot *robot, float dt) {
         }
     }
 
-    /* Sum previous-tick currents for battery sag (explicit 1-tick lag). */
-    float total_current = 0.0f;
+    /* Sum previous-tick currents for battery sag (explicit 1-tick lag).
+     * FIX-AUDIT: two sums. Foldback and terminal-voltage sag key on |I|
+     * (a braking motor still loads the bus); coulomb drain keys on signed
+     * I so regenerative braking credits charge instead of draining. The old
+     * fabsf single sum counted braking as drain. */
+    float abs_current = 0.0f;
+    float signed_current = 0.0f;
     for (int i = 0; i < robot->wheel_count; i++) {
-        total_current += fabsf(robot->wheel_motors[i].current);
+        abs_current += fabsf(robot->wheel_motors[i].current);
+        signed_current += robot->wheel_motors[i].current;
     }
-    /* Bus current foldback (controller limit, NOT a fuse: a real 20A breaker
-     * trips open on I^2t; trip/reset state machine is future work). Scales
-     * drive voltage share when the pack would exceed 20A so stall behaviour
-     * collapses instead of producing impossible thrust. */
+    /* Bus current foldback (controller limit, NOT a fuse: a real 30A
+     * controller limit scales back drive; trip/reset state machine is
+     * future work). Scales drive torque share when the pack would exceed
+     * 30A so stall behaviour collapses instead of producing impossible
+     * thrust. */
     float current_scale = 1.0f;
     const float FTC_BUS_LIMIT_A = 30.0f;
-    if (total_current > FTC_BUS_LIMIT_A && total_current > 0.0f) {
-        current_scale = FTC_BUS_LIMIT_A / total_current;
+    if (abs_current > FTC_BUS_LIMIT_A && abs_current > 0.0f) {
+        current_scale = FTC_BUS_LIMIT_A / abs_current;
     }
-    float terminal_voltage = battery_get_voltage(&robot->battery, total_current);
-    battery_drain(&robot->battery, total_current, dt);
+    float terminal_voltage = battery_get_voltage(&robot->battery, abs_current);
+    battery_drain(&robot->battery, signed_current, dt);
 
     /* Command ramp lives in the teleop layer (gui_robot_apply_drive); this
      * path uses command directly so autonomy / PID / characterization see
@@ -206,8 +232,27 @@ void ftc_robot_update(physics_world *world, ftc_robot *robot, float dt) {
         }
         float wheel_speed = vector3_dot(wheel->angular_velocity, axle);
 
-        /* command already shaped by teleop layer; keep target in sync */
-        robot->wheel_motors[i].command = robot->wheel_motors[i].target_command;
+        /* FIX-AUDIT: honor the motor ramp. command slews toward
+         * target_command at command_ramp_per_s (teleop shaping lives in
+         * gui_robot_apply_drive; this is the actuator-level limit so direct
+         * API users get smooth steps too). Default 1e6 = snap, so existing
+         * autonomy/tests are bit-identical. */
+        {
+            float ramp = robot->wheel_motors[i].command_ramp_per_s;
+            float cur = robot->wheel_motors[i].command;
+            float tgt = robot->wheel_motors[i].target_command;
+            if (!(ramp > 0.0f) || !isfinite(ramp)) {
+                ramp = 1e6f;
+            }
+            float max_step = ramp * dt;
+            float d = tgt - cur;
+            if (d > max_step) {
+                d = max_step;
+            } else if (d < -max_step) {
+                d = -max_step;
+            }
+            robot->wheel_motors[i].command = cur + d;
+        }
         bool driven = (fabsf(robot->wheel_motors[i].command) > 0.05f);
         if (driven) {
             any_driven = true;
@@ -252,6 +297,13 @@ void ftc_robot_update(physics_world *world, ftc_robot *robot, float dt) {
             w_local += tq_net * dt_sub / I_true;
         }
         float torque_avg = impulse / dt;
+        /* FIX-AUDIT: publish the APPLIED average, not the last substep's
+         * instantaneous value. The 16x subcycle spins its local copy far
+         * past the world wheel speed on light wheels, so the last substep
+         * reads cruise (~0.07 N·m) while the world received mostly stall
+         * (~2+ N·m early substeps). Traction (next stage) and telemetry
+         * both consumed the misleading instantaneous value. */
+        robot->wheel_motors[i].output_torque = torque_avg;
 
         /* Motor torque on the wheel + equal-and-opposite stator reaction on
          * the chassis (Newton 3rd; old code torqued wheels only, forcing the
@@ -282,8 +334,13 @@ void ftc_robot_set_wheel_commands(ftc_robot *robot, const float *commands, int c
     if (!robot || !commands) {
         return;
     }
-    /* PHYS-FIX: stale-motor guard. Old code left wheels 2..3 at previous
-     * commands when count < wheel_count. Zero unspecified wheels. */
+    /* FIX-AUDIT: write the TARGET only; command slews toward it in
+     * ftc_robot_update() at command_ramp_per_s. The old double-write
+     * (target AND command) snap-applied every call, which kept the ramp
+     * permanently dead and made full stick an instant stall-torque shock
+     * (joint-pump liftoff/backflip on grippy floor). Constant commands
+     * converge in ~83 ms at the 12/s default, so scripted tests are
+     * unaffected. */
     for (int i = 0; i < robot->wheel_count && i < FTC_MAX_WHEELS; i++) {
         float cmd = 0.0f;
         if (i < count) {
@@ -292,7 +349,6 @@ void ftc_robot_set_wheel_commands(ftc_robot *robot, const float *commands, int c
             if (cmd < -1.0f) cmd = -1.0f;
         }
         robot->wheel_motors[i].target_command = cmd;
-        robot->wheel_motors[i].command = cmd;
     }
 }
 
