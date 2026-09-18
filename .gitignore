@@ -12,6 +12,7 @@
 *.exe
 engine
 test_*
+mpe-tui
 build/
 .fixes_generation_1/
 
@@ -56,3 +57,8 @@ status/
 # ============ Sanitizer / temp build artifacts ============
 /tmp/
 *.san
+
+# ============ Windows ADS metadata (Zone.Identifier) ============
+# Never useful in-repo; 175-file litter removed 2026-09-18.
+*:Zone.Identifier
+*Zone.Identifier
