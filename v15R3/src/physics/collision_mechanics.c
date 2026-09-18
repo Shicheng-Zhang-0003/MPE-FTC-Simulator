@@ -1214,9 +1214,12 @@ void collision_prepare_solver(struct physics_world *world, collision_data *sourc
             cp->effective_mass_tangent2 = 0.0f;
             cp->accumulated_tangent2_impulse = 0.0f;
         }
-        /* FTC mecanum transplant (physics-fixed): roller-based anisotropic frame
-         * for true floor contacts. Grip axis (full mu) ⟂ roller, free axis
-         * (mu~0) along roller. Second axis cold per disc policy. */
+        /* MFS_MECANUM_FRICTION: for mecanum wheels, use roller-based tangent
+         * direction.  The contact solver applies isotropic friction along this
+         * single tangent.  Grip direction (perpendicular to roller) gives the
+         * solver a stable friction axis that resists sliding while the drivetrain
+         * chassis force handles strafe/rotate.  No anisotropic frame — it fights
+         * the chassis force and causes vibration/trembling. */
         cp->anisotropic = false;
         cp->mu_grip = 0.0f;
         cp->mu_free = 0.0f;
@@ -1231,66 +1234,39 @@ void collision_prepare_solver(struct physics_world *world, collision_data *sourc
                     is_floor = true;
             }
             if (mw && mw->type == object_cylinder && is_floor) {
-                vector3 axle_w = mw->cached_axes[0];
-                vector3 fn = m->normal_vector;
-                if (vector3_length_squared(fn) < 0.0001f) fn = (vector3){0.0f, -1.0f, 0.0f};
-                vector3 up = vector3_scaling(fn, -1.0f);
-                vector3 axp = vector3_subtraction(axle_w, vector3_scaling(up, vector3_dot(axle_w, up)));
-                if (vector3_length(axp) > 0.0001f) {
-                    axp = vector3_normalisation(axp);
-                    /* TRUTH: deterministic roller trig via half-angle det
-                     * polynomials (exact IEEE ops). libm cosf/sinf vary
-                     * across platforms; |roller|/2 <= ~0.4 stays in the
-                     * det contract for any sane roller angle. */
-                    float ca, sa;
-                    {
-                        double half = 0.5 * (double) mw->roller_angle_rad;
-                        if ((half > -0.5) && (half < 0.5)) {
-                            double s = det_sin_small(half);
-                            double c = det_cos_small(half);
-                            sa = (float) (2.0 * s * c);
-                            ca = (float) (1.0 - 2.0 * s * s);
-                        } else {
-                            ca = cosf(mw->roller_angle_rad);
-                            sa = sinf(mw->roller_angle_rad);
-                        }
-                    }
-                    vector3 roll_dir = vector3_cross(axp, up);
-                    if (vector3_length(roll_dir) > 0.0001f) roll_dir = vector3_normalisation(roll_dir);
-                    vector3 perp = vector3_cross(up, roll_dir);
-                    vector3 roller = vector3_addition(vector3_scaling(roll_dir, ca), vector3_scaling(perp, sa));
-                    if (vector3_length(roller) > 0.0001f) {
-                        roller = vector3_normalisation(roller);
-                        vector3 grip = vector3_cross(up, roller);
-                        if (vector3_length(grip) > 0.0001f) {
-                            grip = vector3_normalisation(grip);
-                            cp->tangent_vector = grip;
-                            cp->tangent2 = roller;
-                            cp->anisotropic = true;
-                            float sg = fminf(m->object_a->friction_static, m->object_b->friction_static);
-                            float kg = fminf(m->object_a->friction_kinetic, m->object_b->friction_kinetic);
-                            if (sg < kg) sg = kg;
-                            cp->mu_grip = sg;
-                            cp->mu_free = fminf(kg, g_cfg.solver.roller_friction_coeff);
-                            /* Recompute both effective masses for the new frame. */
-                            {
-                                vector3 ra_t = vector3_cross(cp->ra, grip);
-                                vector3 rb_t = vector3_cross(cp->rb, grip);
-                                vector3 aa = vector3_cross(math3_multiplication_vector3(rigidbody_effective_inv_inertia(m->object_a), ra_t), cp->ra);
-                                vector3 ab = vector3_cross(math3_multiplication_vector3(rigidbody_effective_inv_inertia(m->object_b), rb_t), cp->rb);
-                                float k = rigidbody_effective_inv_mass(m->object_a) + rigidbody_effective_inv_mass(m->object_b) + vector3_dot(vector3_addition(aa, ab), grip);
-                                cp->effective_mass_tangent = (k > 0.0f) ? 1.0f / k : 0.0f;
-                            }
-                            {
-                                vector3 ra_t = vector3_cross(cp->ra, roller);
-                                vector3 rb_t = vector3_cross(cp->rb, roller);
-                                vector3 aa = vector3_cross(math3_multiplication_vector3(rigidbody_effective_inv_inertia(m->object_a), ra_t), cp->ra);
-                                vector3 ab = vector3_cross(math3_multiplication_vector3(rigidbody_effective_inv_inertia(m->object_b), rb_t), cp->rb);
-                                float k = rigidbody_effective_inv_mass(m->object_a) + rigidbody_effective_inv_mass(m->object_b) + vector3_dot(vector3_addition(aa, ab), roller);
-                                cp->effective_mass_tangent2 = (k > 0.0f) ? 1.0f / k : 0.0f;
-                            }
-                            cp->accumulated_tangent2_impulse = 0.0f;
-                        }
+                vector3 axle_world = mw->cached_axes[0];
+                vector3 floor_normal = m->normal_vector;
+                if (vector3_length_squared(floor_normal) < 0.0001f) {
+                    floor_normal = (vector3){0.0f, 1.0f, 0.0f};
+                }
+                /* Project axle onto floor plane */
+                vector3 axle_proj = vector3_subtraction(
+                    axle_world,
+                    vector3_scaling(floor_normal, vector3_dot(axle_world, floor_normal))
+                );
+                float axle_proj_len = vector3_length(axle_proj);
+                if (axle_proj_len > 0.0001f) {
+                    axle_proj = vector3_scaling(axle_proj, 1.0f / axle_proj_len);
+                    /* Roller direction at roller_angle from wheel forward, in floor plane.
+                     * Grip direction = perpendicular to roller (friction tangent). */
+                    float cos_a = cosf(mw->roller_angle_rad);
+                    float sin_a = sinf(mw->roller_angle_rad);
+                    vector3 perp = vector3_cross(floor_normal, axle_proj);
+                    vector3 roller_free = vector3_addition(
+                        vector3_scaling(axle_proj, cos_a),
+                        vector3_scaling(perp, sin_a)
+                    );
+                    vector3 grip_dir = vector3_cross(floor_normal, roller_free);
+                    float grip_len = vector3_length(grip_dir);
+                    if (grip_len > 0.0001f) {
+                        cp->tangent_vector = vector3_scaling(grip_dir, 1.0f / grip_len);
+                        /* Recompute effective mass for the grip-direction tangent. */
+                        vector3 ra_t = vector3_cross(cp->ra, cp->tangent_vector);
+                        vector3 rb_t = vector3_cross(cp->rb, cp->tangent_vector);
+                        vector3 aa = vector3_cross(math3_multiplication_vector3(rigidbody_effective_inv_inertia(m->object_a), ra_t), cp->ra);
+                        vector3 ab = vector3_cross(math3_multiplication_vector3(rigidbody_effective_inv_inertia(m->object_b), rb_t), cp->rb);
+                        float k = rigidbody_effective_inv_mass(m->object_a) + rigidbody_effective_inv_mass(m->object_b) + vector3_dot(vector3_addition(aa, ab), cp->tangent_vector);
+                        cp->effective_mass_tangent = (k > 0.0f) ? 1.0f / k : 0.0f;
                     }
                 }
             }
