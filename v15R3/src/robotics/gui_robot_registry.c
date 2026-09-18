@@ -48,8 +48,15 @@ void gui_robot_tick(float dt) {
     }
 }
 
-static float mfs_smooth_fwd = 0.0f, mfs_smooth_strafe = 0.0f, mfs_smooth_rot = 0.0f;
 static float mfs_shape_axis(float target, float cur, float dt) {
+    if (!(dt > 0.0f) || !isfinite(dt)) {
+        dt = 1.0f / 60.0f;
+    }
+    /* FIX-AUDIT: clamp runaway dt (was fixed 1/60 regardless of frame rate:
+     * 30 fps ramped 2x too fast). */
+    if (dt > 0.1f) {
+        dt = 0.1f;
+    }
     float max_d = 8.0f * dt;
     float d = target - cur;
     if (d > max_d) d = max_d;
@@ -58,24 +65,30 @@ static float mfs_shape_axis(float target, float cur, float dt) {
 }
 
 void gui_robot_apply_drive(float forward, float strafe, float rotate) {
+    gui_robot_apply_drive_dt(forward, strafe, rotate, 1.0f / 60.0f);
+}
+
+void gui_robot_apply_drive_dt(float forward, float strafe, float rotate, float dt) {
     if (mfs_gui_robot_count <= 0 || !mfs_gui_robot_world) return;
-    const float shape_dt = 1.0f / 60.0f;
-    mfs_smooth_fwd = mfs_shape_axis(forward, mfs_smooth_fwd, shape_dt);
-    mfs_smooth_strafe = mfs_shape_axis(strafe, mfs_smooth_strafe, shape_dt);
-    mfs_smooth_rot = mfs_shape_axis(rotate, mfs_smooth_rot, shape_dt);
     for (int i = 0; i < mfs_gui_robot_count; i++) {
-        if (mfs_gui_robots[i].drivetrain_type == FTC_DRIVETRAIN_TANK) {
+        /* FIX-AUDIT: per-robot smoother state (was process-global singletons
+         * shared across all robots: robot 2 inherited robot 1's history). */
+        ftc_robot *rb = &mfs_gui_robots[i];
+        rb->smooth_fwd = mfs_shape_axis(forward, rb->smooth_fwd, dt);
+        rb->smooth_strafe = mfs_shape_axis(strafe, rb->smooth_strafe, dt);
+        rb->smooth_rot = mfs_shape_axis(rotate, rb->smooth_rot, dt);
+        if (rb->drivetrain_type == FTC_DRIVETRAIN_TANK) {
             /* TRUTH: normalize like mecanum (preserve turn authority at full
              * stick) instead of per-side clamping, which distorts turns. */
-            float l = mfs_smooth_fwd + mfs_smooth_rot, r = mfs_smooth_fwd - mfs_smooth_rot;
-            float m = (fabsf(l) > fabsf(r)) ? fabsf(l) : fabsf(r);
+            float l = rb->smooth_fwd + rb->smooth_rot, rr = rb->smooth_fwd - rb->smooth_rot;
+            float m = (fabsf(l) > fabsf(rr)) ? fabsf(l) : fabsf(rr);
             if (m > 1.0f) {
                 l /= m;
-                r /= m;
+                rr /= m;
             }
-            drivetrain_tank(&mfs_gui_robots[i], l, r);
+            drivetrain_tank(rb, l, rr);
         } else
-            drivetrain_mecanum(&mfs_gui_robots[i], mfs_smooth_fwd, mfs_smooth_strafe, mfs_smooth_rot);
+            drivetrain_mecanum(rb, rb->smooth_fwd, rb->smooth_strafe, rb->smooth_rot);
     }
 }
 

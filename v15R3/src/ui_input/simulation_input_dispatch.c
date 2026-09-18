@@ -18,18 +18,24 @@ void simulation_input_dispatch(GtkWidget *parent_window) {
         main_inputs.right_mouse_button_clicked = false;
     }
     if (main_inputs.middle_mouse_button_clicked) {
+        /* FIX-AUDIT: pool-compacting remove races the worker's step
+         * (manifolds hold raw body pointers). Serialize. */
+        world_lock();
         if (selected_object >= 0) {
             scene_remove_object_by_index(selected_object);
         }
+        world_unlock();
         main_inputs.middle_mouse_button_clicked = false;
     }
     /* Backspace deletes the selected object (trackpads have no middle
      * button; mirrors the middle-click path above). Removal remaps the
      * selection internally; both flags are consumed here. */
     if (main_inputs.delete_key_pressed) {
+        world_lock();
         if (selected_object >= 0) {
             scene_remove_object_by_index(selected_object);
         }
+        world_unlock();
         main_inputs.delete_key_pressed = false;
     }
     if (main_inputs.e_key_pressed) {
@@ -121,7 +127,7 @@ void simulation_input_dispatch(GtkWidget *parent_window) {
             if (drive_rotate > 1.0f) drive_rotate = 1.0f;
             if (drive_rotate < -1.0f) drive_rotate = -1.0f;
         }
-         gui_robot_apply_drive(drive_forward, drive_strafe, drive_rotate);
+         gui_robot_apply_drive_dt(drive_forward, drive_strafe, drive_rotate, main_timer.delta_time);
     }
 
 /* Spawn gun (Enter hold) */
@@ -132,6 +138,9 @@ void simulation_input_dispatch(GtkWidget *parent_window) {
     if ((main_inputs.enter_spawn_held) && (!editor_dialog_is_active()) && (!main_inputs.is_menu_open) &&
         (main_inputs.spawner_menu_level == 0) && (main_inputs.velocity_menu_level == 0) &&
         (main_inputs.object_menu_level == 0)) {
+        /* FIX-AUDIT: spawner pool writes race the worker step. The whole
+         * spawn-gun body is short world math + pool appends (no GTK). */
+        world_lock();
         if (!enter_previously_held) {
             if (main_inputs.current_spawn_type == 0) {
                 spawner_launch_sphere(g_cfg.spawner.radius, g_cfg.spawner.mass, g_cfg.spawner.speed);
@@ -171,6 +180,7 @@ void simulation_input_dispatch(GtkWidget *parent_window) {
             }
         }
         enter_previously_held = true;
+        world_unlock();
     } else {
         enter_hold_timer = 0.0f;
         enter_previously_held = false;

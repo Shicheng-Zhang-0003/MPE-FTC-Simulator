@@ -137,7 +137,28 @@ void gamepad_close(gamepad_state *pad) {
 }
 
 void gamepad_poll(gamepad_state *pad) {
-    if (!pad || !pad->connected || pad->fd < 0) return;
+    if (!pad) return;
+    static int linux_reconnect_counter = 0;
+    /* FIX-AUDIT: Linux reconnect (was return-immediately when disconnected:
+     * a hot-unplug killed drive until restart, while the Win32 branch above
+     * retries every 60 frames). Probe the stored device path at the same
+     * 60-frame cadence. */
+    if (!pad->connected || pad->fd < 0) {
+        if (++linux_reconnect_counter >= 60) {
+            linux_reconnect_counter = 0;
+            const char *path = (pad->device_path[0] != '\0') ? pad->device_path : "/dev/input/js0";
+            int probe_fd = open(path, O_RDONLY | O_NONBLOCK);
+            if (probe_fd >= 0) {
+                pad->fd = probe_fd;
+                pad->connected = true;
+                memset(pad->axes, 0, sizeof(pad->axes));
+                memset(pad->buttons, 0, sizeof(pad->buttons));
+                printf("[gamepad] device reconnected (%s)\n", path);
+            }
+        }
+        return;
+    }
+    linux_reconnect_counter = 0;
     struct js_event ev;
     ssize_t bytes;
     while ((bytes = read(pad->fd, &ev, sizeof(ev))) == sizeof(ev)) {
@@ -151,7 +172,13 @@ void gamepad_poll(gamepad_state *pad) {
         }
     }
     if (bytes < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
-        close(pad->fd); pad->fd = -1; pad->connected = false;
+        close(pad->fd);
+        pad->fd = -1;
+        pad->connected = false;
+        /* FIX-AUDIT: zero state on disconnect (Win32 parity): stale axes
+         * otherwise keep driving for up to 60 frames until reconnect. */
+        memset(pad->axes, 0, sizeof(pad->axes));
+        memset(pad->buttons, 0, sizeof(pad->buttons));
     }
 }
 #endif /* _WIN32 */
