@@ -6,19 +6,17 @@
 #include <math.h>
 #include <string.h>
 
-/* Robot dimensions (metres, approximate FTC 18" x 18" chassis) */
-#define CHASSIS_HALF_X 0.225f
-#define CHASSIS_HALF_Y 0.075f
-#define CHASSIS_HALF_Z 0.225f
-#define CHASSIS_MASS 8.92f /* chassis + 4 motors/gearboxes (~0.23 kg each); total 9.8 kg */
-#define WHEEL_RADIUS 0.05f /* 100mm wheels (96/104mm class, parameterized later) */
-#define WHEEL_MASS 0.22f /* bare wheel + rollers (sprung motor mass lives on chassis) */
-#define WHEEL_HALF_WIDTH 0.02f /* 40mm wide wheels */
+/* Robot dimensions — FTC 18"×18" chassis (0.457m × 0.457m) */
+#define CHASSIS_HALF_X 0.2285f  /* 18" / 2 = 9" = 0.2286m */
+#define CHASSIS_HALF_Y 0.040f   /* ~3" tall plate; realistic for 1/8" aluminium + belly pan */
+#define CHASSIS_HALF_Z 0.2285f  /* square chassis */
+#define CHASSIS_MASS 2.5f       /* ~5.5 lbs typical FTC robot (chassis + 4 motors + battery) */
+#define WHEEL_RADIUS 0.048f     /* 96mm goBILDA mecanum (official SKU 3213-3606-0002) */
+#define WHEEL_MASS 0.207f       /* 207g per official goBILDA spec */
+#define WHEEL_HALF_WIDTH 0.02f  /* 40mm wide (20mm half-width) */
 #define WHEEL_CLEARANCE_M 0.005f /* vertical gap wheel-top to chassis-bottom */
 #define WHEEL_CLEARANCE_SIDE_M 0.010f /* lateral gap (tilt travel under load) */
-/* NOTE: track is 0.51 m outboard of an 18 in (0.457 m) frame: wheels sit
- * outside the rails (gap above) rather than inboard like many real builds.
- * Modeling choice for joint clearance; narrows if inboard geometry lands. */
+/* 18"×18" frame: wheels sit just outside the rails for clearance. */
 #define WHEEL_OFFSET_X (CHASSIS_HALF_X + WHEEL_HALF_WIDTH + WHEEL_CLEARANCE_SIDE_M)
 #define WHEEL_OFFSET_Z 0.20f
 /* Wheels clear the chassis: 5 mm vertical gap (was 10 mm overlap). */
@@ -107,18 +105,18 @@ memset(robot, 0, sizeof(ftc_robot));
 return 1;
         }
 
-        /* MFS_MECANUM_REAL: Mark wheel as mecanum with roller angle.
-         * Standard FTC mecanum (axle along X, robot forward = +Z):
-         *   FL (-X,+Z): roller at -45° from forward (+Z) = +45° from axle (+X)
-         *   FR (+X,+Z): roller at +45° from forward = -45° from axle
-         *   BL (-X,-Z): roller at +45° from forward = -45° from axle
-         *   BR (+X,-Z): roller at -45° from forward = +45° from axle
-         * Matches drivetrain_mecanum IK: positive strafe = +X world. */
-        float roller_angle = 0.0f;
-        if (i == 0) roller_angle = -0.78539816339f;      /* front-left: -45° from forward */
-        if (i == 1) roller_angle = 0.78539816339f;       /* front-right: +45° from forward */
-        if (i == 2) roller_angle = 0.78539816339f;       /* back-left: +45° from forward */
-        if (i == 3) roller_angle = -0.78539816339f;      /* back-right: -45° from forward */
+/* MFS_MECANUM_REAL: Mark wheel as mecanum with roller angle.
+          * Standard FTC mecanum (axle along X, robot forward = +Z):
+          *   FL (-X,+Z): roller at +45° from forward (+Z) = +45° from axle (+X)
+          *   FR (+X,+Z): roller at -45° from forward = -45° from axle
+          *   BL (-X,-Z): roller at -45° from forward = -45° from axle
+          *   BR (+X,-Z): roller at +45° from forward = +45° from axle
+          * Matches drivetrain_mecanum IK: positive strafe = +X world. */
+         float roller_angle = 0.0f;
+         if (i == 0) roller_angle = 0.78539816339f;      /* front-left: +45° from forward */
+         if (i == 1) roller_angle = -0.78539816339f;       /* front-right: -45° from forward */
+         if (i == 2) roller_angle = -0.78539816339f;       /* back-left: -45° from forward */
+         if (i == 3) roller_angle = 0.78539816339f;      /* back-right: +45° from forward */
         
         if (robot->drivetrain_type == FTC_DRIVETRAIN_MECANUM) {
                 rigidbody_set_mecanum(&world->bodies[robot->wheel_bodies[i]], true, roller_angle);
@@ -164,6 +162,14 @@ void ftc_robot_update(physics_world *world, ftc_robot *robot, float dt) {
     if ((!world) || (!robot) || (dt <= 0.0f)) {
         return;
     }
+    /* Reset drive tracking for this tick; drivetrain_update sets
+     * driven_this_tick=true on wheels with active commands. */
+    for (int i = 0; i < robot->wheel_count; i++) {
+        int wi = robot->wheel_bodies[i];
+        if ((wi >= 0) && (wi < world->body_count)) {
+            world->bodies[wi].driven_this_tick = false;
+        }
+    }
 
     /* Sum previous-tick currents for battery sag (explicit 1-tick lag). */
     float total_current = 0.0f;
@@ -175,7 +181,7 @@ void ftc_robot_update(physics_world *world, ftc_robot *robot, float dt) {
      * drive voltage share when the pack would exceed 20A so stall behaviour
      * collapses instead of producing impossible thrust. */
     float current_scale = 1.0f;
-    const float FTC_BUS_LIMIT_A = 20.0f;
+    const float FTC_BUS_LIMIT_A = 30.0f;
     if (total_current > FTC_BUS_LIMIT_A && total_current > 0.0f) {
         current_scale = FTC_BUS_LIMIT_A / total_current;
     }
@@ -257,6 +263,9 @@ void ftc_robot_update(physics_world *world, ftc_robot *robot, float dt) {
             rigidbody *chassis = &world->bodies[robot->chassis_body];
             chassis->torque_accumulator = vector3_subtraction(
                 chassis->torque_accumulator, vector3_scaling(axle, torque_avg));
+        }
+        if (driven) {
+            wheel->driven_this_tick = true;
         }
         /* Drive activity wakes (parked robots sleep honestly via error-gated
          * joint wakes; the old blanket chassis wake vetoed sleep always). */
