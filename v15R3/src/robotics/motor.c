@@ -25,7 +25,7 @@ void motor_from_spec(motor *m, float stall_torque_nm, float free_speed_rpm, floa
      * within ~3%. R = V/Istall. */
     float denom = stall_current_a * m->gear_ratio * m->efficiency;
     m->kt = (denom > 0.0f) ? (stall_torque_nm / denom) : 0.0f;
-    m->no_load_current = 0.25f * (19.2f / m->gear_ratio);
+    m->no_load_current = 0.25f;
     if (m->no_load_current < 0.05f) m->no_load_current = 0.05f;
     if (m->no_load_current > 0.40f) m->no_load_current = 0.40f;
     m->resistance = (stall_current_a > 0.0f) ? (nominal_voltage / stall_current_a) : 1.0f;
