@@ -4,13 +4,14 @@
 //File library file definition
 #ifndef math3d_h
 #define math3d_h
-//Pi definition
+//Pi definition (double precision literal; float sites cast explicitly so
+//degree/radian conversion matches math4_special.h instead of drifting ~1e-7).
 #ifndef math_pi
-#define math_pi 3.14159265358979323846f
+#define math_pi 3.14159265358979323846
 #endif
 //Define Radians and Degree Calculation converter
-#define degrad (math_pi / 180.0f)
-#define raddeg (180.0f / math_pi)
+#define degrad ((float)(math_pi / 180.0))
+#define raddeg ((float)(180.0 / math_pi))
 #define math_epsilon 0.000001f
 //Structures for use as typedefs
 //Vector in 3D for objects in motion

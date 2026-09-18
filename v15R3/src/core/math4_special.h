@@ -64,9 +64,11 @@ static inline math4 math4_look_view(vector3 camera_position, vector3 camera_fron
 } //Perspective Projection Matrices
 static inline math4 math4_perspective_fov(float field_of_view, float aspect_ratio, float near_plane, float far_plane) {
     math4 result_matrix = {{{0}}};
-    /* Clamp degenerate inputs so a bad config can never produce NaN/Inf. */
-    if (!(field_of_view > 0.01f && field_of_view < 3.14f)) {
-        field_of_view = 45.0f * 3.14159265358979323846f / 180.0f;
+    /* Clamp degenerate inputs so a bad config can never produce NaN/Inf.
+     * FIX-AUDIT: upper fov bound is pi (was a 3.14 literal that rejected
+     * legal [3.14, pi) fields of view). */
+    if (!(field_of_view > 0.01f && field_of_view < (float) math_pi)) {
+        field_of_view = 45.0f * (float) math_pi / 180.0f;
     }
     if (!(aspect_ratio > 1e-6f && aspect_ratio < 1e6f)) {
         aspect_ratio = 16.0f / 9.0f;
