@@ -2,10 +2,10 @@
 #ifndef battery_h
 #define battery_h
 
-/* FTC pack: 12V NiMH 3000mAh (goBILDA 12V nested, 20A fuse). Peukert 1.1
- * coulomb counting; terminal floored at 0 (empty means empty). Breaker
- * trip/reset dynamics intentionally unmodeled (see bus foldback note in
- * robot.c); over-current protection beyond foldback is future work. */
+/* FTC pack: 12V NiMH 3000mAh (goBILDA 12V nested, 30A controller foldback).
+ * Peukert 1.1 coulomb counting; terminal floored at 0 (empty means empty).
+ * Breaker trip/reset dynamics intentionally unmodeled (see bus foldback note
+ * in robot.c); over-current protection beyond foldback is future work. */
 typedef struct {
     float nominal_voltage; /* V (12.0 NiMH) */
     float internal_resistance; /* ohms (~0.03 pack + wiring) */

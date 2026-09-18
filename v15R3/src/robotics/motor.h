@@ -13,12 +13,14 @@ typedef struct {
     float gearbox_drag; /* N·m Coulomb drag at output (Kt*I0*G*eff; zeroes net at free) */
 
     /* Mechanical */
-    float gear_ratio; /* output/input */
+    float gear_ratio; /* reduction G:1 (output speed = shaft/G, e.g. 19.2) */
     float efficiency; /* 0..1 */
 
     /* MFS_314_DRIVE_RAMP: input shaping. The controller writes target_command;
-     * the applied command ramps toward it, so stick snaps become smooth
-     * acceleration — "buttery" on a controller rather than wheel-slam. */
+     * command slews toward it at command_ramp_per_s (default 12/s actuator
+     * slew, ~83 ms 0-to-full), so stick snaps become smooth acceleration —
+     * "buttery" on a controller rather than wheel-slam. Set 1e6 for snap
+     * (characterization only). */
     float target_command;      /* -1..1 requested by the controller each tick */
     float command_ramp_per_s;  /* how fast command can change (units/s) */
     float command;             /* -1..1 applied (ramped toward target) */

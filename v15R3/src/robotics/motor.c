@@ -45,9 +45,13 @@ void motor_from_spec(motor *m, float stall_torque_nm, float free_speed_rpm, floa
 
     m->command = 0.0f;
     m->target_command = 0.0f;
-    /* PHYS-FIX: ramp is teleop shaping, not motor physics. Default to snap
-     * (huge rate); gui_robot_apply_drive applies the 8/s ramp for sticks. */
-    m->command_ramp_per_s = 1e6f;
+    /* FIX-AUDIT: actuator slew (was snap 1e6 with the ramp mechanics dead:
+     * full stick meant instant stall torque, which excited the joint pump
+     * into liftoff/backflip on grippy floor). 12/s reaches full stick in
+     * ~83 ms — actuator-realistic, and tests are unaffected (shortest
+     * scripted phase is 500 ms). gui_robot_apply_drive keeps its own 8/s
+     * stick shaping on top for the gamepad path. */
+    m->command_ramp_per_s = 12.0f;
     m->effective_inertia = 0.0f;
     m->current = 0.0f;
     m->back_emf = 0.0f;
@@ -105,9 +109,11 @@ void motor_update(motor *m, float wheel_angular_vel, float dt, float battery_vol
     if (m->output_torque > stall_torque_output) m->output_torque = stall_torque_output;
     if (m->output_torque < -stall_torque_output) m->output_torque = -stall_torque_output;
 
-    /* Speed tracking: report motor shaft RPM (output * gear) and wheel RPM separately;
-     * m->rpm stores output (wheel) RPM for telemetry consistency with spec sheets (output RPM). */
-    m->rpm = fabsf(wheel_angular_vel) / MOTOR_RPM_TO_RAD_S;
+    /* Speed tracking: signed output (wheel) RPM for telemetry consistency
+     * with spec sheets (output RPM, not shaft RPM).
+     * FIX-AUDIT: was fabsf (direction destroyed — telemetry could never show
+     * reverse; odometry-adjacent tooling read it as unsigned). */
+    m->rpm = wheel_angular_vel / MOTOR_RPM_TO_RAD_S;
 
     /* Simplified thermal: heat = I^2*R*dt (J), thermal_mass ~50 J/°C (0.1kg*500J/kgK) */
     float heat_generated = m->current * m->current * m->resistance * dt;
