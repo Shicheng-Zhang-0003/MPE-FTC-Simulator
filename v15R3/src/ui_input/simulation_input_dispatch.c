@@ -23,7 +23,20 @@ void simulation_input_dispatch(GtkWidget *parent_window) {
         }
         main_inputs.middle_mouse_button_clicked = false;
     }
+    /* Backspace deletes the selected object (trackpads have no middle
+     * button; mirrors the middle-click path above). Removal remaps the
+     * selection internally; both flags are consumed here. */
+    if (main_inputs.delete_key_pressed) {
+        if (selected_object >= 0) {
+            scene_remove_object_by_index(selected_object);
+        }
+        main_inputs.delete_key_pressed = false;
+    }
     if (main_inputs.e_key_pressed) {
+        /* FIX_FLICKER: this flag was never consumed, so one E press toggled
+         * the menu every frame forever. Consume it: exactly one toggle per
+         * press (repeats are already latched out in on_keypress). */
+        main_inputs.e_key_pressed = false;
         if (selected_object >= 0) {
             if (main_inputs.object_menu_level > 0) {
                 main_inputs.object_menu_level = 0;
@@ -108,7 +121,7 @@ void simulation_input_dispatch(GtkWidget *parent_window) {
             if (drive_rotate > 1.0f) drive_rotate = 1.0f;
             if (drive_rotate < -1.0f) drive_rotate = -1.0f;
         }
-        gui_robot_apply_drive(drive_forward, drive_strafe, drive_rotate);
+         gui_robot_apply_drive(drive_forward, drive_strafe, drive_rotate);
     }
 
 /* Spawn gun (Enter hold) */

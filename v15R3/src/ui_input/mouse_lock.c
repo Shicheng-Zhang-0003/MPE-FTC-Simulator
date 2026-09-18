@@ -11,10 +11,14 @@ void mouse_lock_enable(GtkWidget *window_widget) {
     GdkDisplay *gdk_display_instance = gdk_window_get_display(gdk_window_handle);
     GdkSeat *gdk_seat_instance = gdk_display_get_default_seat(gdk_display_instance);
     GdkCursor *blank_cursor_handle = gdk_cursor_new_for_display(gdk_display_instance, GDK_BLANK_CURSOR);
-    // Grab everything: Pointer, owner_events = FALSE (trap it), use blank cursor, and confine to THIS window
+    /* Grab everything: Pointer, owner_events = FALSE (trap it), use blank cursor, and confine to THIS window */
     gdk_seat_grab(gdk_seat_instance, gdk_window_handle, GDK_SEAT_CAPABILITY_POINTER, FALSE, blank_cursor_handle, NULL,
                   NULL, NULL);
     g_object_unref(blank_cursor_handle);
+    /* Reset relative tracking state on fresh lock. */
+    main_inputs.mouse_centered = false;
+    main_inputs.last_mouse_x = 0;
+    main_inputs.last_mouse_y = 0;
 }
 void mouse_lock_disable(GtkWidget *window_widget) {
     (void) window_widget;
@@ -40,14 +44,21 @@ void mouse_lock_reset_centre(GtkWidget *window_widget) {
     GdkSeat *gdk_seat_instance = gdk_display_get_default_seat(gdk_display_instance);
     GdkDevice *pointer_device_instance = gdk_seat_get_pointer(gdk_seat_instance);
     gdk_device_warp(pointer_device_instance, gdk_window_get_screen(gdk_window_handle), warp_target_x, warp_target_y);
-    // Re-assert grab after warp — multi-monitor warps can silently drop the seat grab
+    /* Re-assert grab after warp — multi-monitor warps can silently drop the seat grab */
     GdkCursor *blank_cursor_handle = gdk_cursor_new_for_display(gdk_display_instance, GDK_BLANK_CURSOR);
     gdk_seat_grab(gdk_seat_instance, gdk_window_handle, GDK_SEAT_CAPABILITY_POINTER, FALSE, blank_cursor_handle, NULL,
                   NULL, NULL);
     g_object_unref(blank_cursor_handle);
+    /* After warp, cursor is at center. Next motion event should baseline from center. */
+    main_inputs.mouse_centered = false;
+    main_inputs.last_mouse_x = 0;
+    main_inputs.last_mouse_y = 0;
 }
 void mouse_lock_reacquire(GtkWidget *window_widget) {
     if (!main_inputs.is_mouse_locked) {
+        return;
+    }
+    if (main_inputs.mouse_lock_state != 2) {
         return;
     }
     GdkWindow *gdk_window_handle = gtk_widget_get_window(window_widget);
@@ -61,6 +72,10 @@ void mouse_lock_reacquire(GtkWidget *window_widget) {
                   NULL, NULL);
     g_object_unref(blank_cursor_handle);
     main_inputs.suppress_mouse_delta = false;
-    //Reset warp guard so the first motion event after reacquire is not eaten
+    /* Reset relative tracking baseline so the first motion event after
+     * reacquire establishes a fresh position. */
+    main_inputs.mouse_centered = false;
+    main_inputs.last_mouse_x = 0;
+    main_inputs.last_mouse_y = 0;
     mouse_lock_reset_centre(window_widget);
 }

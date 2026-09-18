@@ -23,7 +23,7 @@ void initialize_input (input_status *input_state) {
     input_state -> j_key_pressed = false;
     input_state -> k_key_pressed = false;
     input_state -> l_key_pressed = false;
-    /* MPE_TASK_21_KEYBOARD_ONLY_INIT_BEGIN (r only) */
+     /* MPE_TASK_21_KEYBOARD_ONLY_INIT_BEGIN (r only) */
 input_state -> r_key_pressed = false;
 /* MPE_TASK_21_KEYBOARD_ONLY_INIT_END */
 //Menu
@@ -67,7 +67,13 @@ input_state -> enter_spawn_held = false;
     input_state -> middle_mouse_button_clicked = false;
     input_state -> mouse_delta_x = 0.0f;
     input_state -> mouse_delta_y = 0.0f;
+    input_state -> mouse_delta_accum_x = 0.0f;
+    input_state -> mouse_delta_accum_y = 0.0f;
     input_state -> suppress_mouse_delta = false;
+    input_state -> last_mouse_x = 0;
+    input_state -> last_mouse_y = 0;
+    input_state -> mouse_centered = false;
+    input_state -> mouse_lock_state = 0;
     input_state -> marked_joint_object_index = -1;
 } gboolean on_keypress (GtkWidget *widget, GdkEventKey *event, gpointer user_data_stored) {
     (void) widget;
@@ -76,9 +82,19 @@ input_state -> enter_spawn_held = false;
     if (event -> keyval == GDK_KEY_a) {input_state -> a_key_pressed = true;}
     if (event -> keyval == GDK_KEY_s) {input_state -> s_key_pressed = true;}
     if (event -> keyval == GDK_KEY_d) {input_state -> d_key_pressed = true;}
-    if (event -> keyval == GDK_KEY_e) {input_state -> e_key_pressed = true;}
+    /* E toggles the object menu: edge-triggered via e_key_held latch so
+     * key auto-repeat while held cannot re-toggle (menu flicker). */
+    if (event -> keyval == GDK_KEY_e) {
+        if (!input_state -> e_key_held) {
+            input_state -> e_key_pressed = true;
+            input_state -> e_key_held = true;
+        }
+    }
+    /* Backspace deletes the selected object (trackpads lack middle-click). */
+    if (event -> keyval == GDK_KEY_BackSpace) {input_state -> delete_key_pressed = true;}
     if (event -> keyval == GDK_KEY_f) {input_state -> f_key_pressed = true;}
-/* q/m/delete/t/left/right REMOVED (dead or deleted keybinds; see header). */
+/* q/m/t/left/right REMOVED (dead or deleted keybinds; see header). Delete is
+ * back as Backspace (see below). */
 /* MPE_TASK_21_KEYBOARD_ONLY_KEYPRESS_BEGIN (r only) */
 if ((event -> keyval == GDK_KEY_r) || (event -> keyval == GDK_KEY_R)) {input_state -> r_key_pressed = true;}
 /* MPE_TASK_21_KEYBOARD_ONLY_KEYPRESS_END */
@@ -96,11 +112,11 @@ if (event -> keyval == GDK_KEY_F11) {input_state -> config_torture_pressed = tru
     if (event -> keyval == GDK_KEY_i) {input_state -> i_key_pressed = true;}
     if (event -> keyval == GDK_KEY_j) {input_state -> j_key_pressed = true;}
     if (event -> keyval == GDK_KEY_k) {input_state -> k_key_pressed = true;}
-    if (event -> keyval == GDK_KEY_l) {input_state -> l_key_pressed = true;}
-    if ((event -> keyval == GDK_KEY_9) && (!config_menu_is_open ())) {input_state -> spawner_menu_level = 0; input_state -> velocity_menu_level = 0; input_state -> object_menu_level = 0; input_state -> is_menu_open = !(input_state -> is_menu_open);}
-    if ((event -> keyval == GDK_KEY_8) && (!config_menu_is_open ())) {input_state -> is_menu_open = false; input_state -> velocity_menu_level = 0; input_state -> object_menu_level = 0; if (input_state -> spawner_menu_level > 0) {input_state -> spawner_menu_level = 0;} else {input_state -> spawner_menu_level = 1;}}
-    if ((event -> keyval == GDK_KEY_7) && (!config_menu_is_open ())) {input_state -> is_menu_open = false; input_state -> spawner_menu_level = 0; input_state -> object_menu_level = 0; if (input_state -> velocity_menu_level > 0) {input_state -> velocity_menu_level = 0;} else {input_state -> velocity_menu_level = 1;}}
-/* MPE_TASK_35_CONFIG_MENU_KEY_BEGIN */
+     if (event -> keyval == GDK_KEY_l) {input_state -> l_key_pressed = true;}
+     if ((event -> keyval == GDK_KEY_9) && (!config_menu_is_open ())) {input_state -> spawner_menu_level = 0; input_state -> velocity_menu_level = 0; input_state -> object_menu_level = 0; input_state -> is_menu_open = !(input_state -> is_menu_open);}
+     if ((event -> keyval == GDK_KEY_8) && (!config_menu_is_open ())) {input_state -> is_menu_open = false; input_state -> velocity_menu_level = 0; input_state -> object_menu_level = 0; if (input_state -> spawner_menu_level > 0) {input_state -> spawner_menu_level = 0;} else {input_state -> spawner_menu_level = 1;}}
+     if ((event -> keyval == GDK_KEY_7) && (!config_menu_is_open ())) {input_state -> is_menu_open = false; input_state -> spawner_menu_level = 0; input_state -> object_menu_level = 0; if (input_state -> velocity_menu_level > 0) {input_state -> velocity_menu_level = 0;} else {input_state -> velocity_menu_level = 1;}}
+ /* MPE_TASK_35_CONFIG_MENU_KEY_BEGIN */
 if ((event -> keyval == GDK_KEY_6) && (!input_state -> is_menu_open) && (input_state -> object_menu_level == 0)) {
 input_state -> spawner_menu_level = 0;
 input_state -> velocity_menu_level = 0;
@@ -151,8 +167,8 @@ if (input_state -> is_menu_open) {
         if (event -> keyval == GDK_KEY_2) {input_state -> spawner_menu_level = 5;}
         if (event -> keyval == GDK_KEY_3) {input_state -> spawner_menu_level = 8;}
         if (event -> keyval == GDK_KEY_4) {input_state -> spawner_menu_level = 9;}
-        /* FTC robot spawn (key 5 is unbound at this menu level). */
-        if (event -> keyval == GDK_KEY_5) {gui_robot_spawn(0.0f, ftc_robot_rest_height(), 0.0f, MOTOR_GB_5203_30);}
+        /* FTC robot spawn (key 5): goBILDA 5203 19.2:1 motor. */
+        if (event -> keyval == GDK_KEY_5) {gui_robot_spawn(0.0f, ftc_robot_rest_height(), 0.0f, MOTOR_GB_5203_19_2);}
     } else if (input_state -> spawner_menu_level == 2) {
         if (event -> keyval == GDK_KEY_1) {input_state -> spawner_menu_level = 3;}
         if (event -> keyval == GDK_KEY_2) {input_state -> spawner_menu_level = 4;}
@@ -231,14 +247,11 @@ if (event -> keyval == GDK_KEY_space) {input_state -> space_key_pressed = true;}
     if (event -> keyval == GDK_KEY_a) {input_state -> a_key_pressed = false;}
     if (event -> keyval == GDK_KEY_s) {input_state -> s_key_pressed = false;}
     if (event -> keyval == GDK_KEY_d) {input_state -> d_key_pressed = false;}
-/* MPE_TASK_21_KEYBOARD_ONLY_KEYRELEASE_BEGIN (r only) */
+ /* MPE_TASK_21_KEYBOARD_ONLY_KEYRELEASE_BEGIN (r only) */
 if ((event -> keyval == GDK_KEY_r) || (event -> keyval == GDK_KEY_R)) {input_state -> r_key_pressed = false;}
-/* MPE_TASK_21_KEYBOARD_ONLY_KEYRELEASE_END */
-    if (event -> keyval == GDK_KEY_i) {input_state -> i_key_pressed = false;}
-    if (event -> keyval == GDK_KEY_j) {input_state -> j_key_pressed = false;}
-    if (event -> keyval == GDK_KEY_k) {input_state -> k_key_pressed = false;}
-    if (event -> keyval == GDK_KEY_l) {input_state -> l_key_pressed = false;}
-/* q/m/delete/t REMOVED (dead or deleted keybinds). */
+ /* MPE_TASK_21_KEYBOARD_ONLY_KEYRELEASE_END */
+     if (event -> keyval == GDK_KEY_e) {input_state -> e_key_held = false;}
+    if (event -> keyval == GDK_KEY_BackSpace) {input_state -> delete_key_pressed = false;}
     if (event -> keyval == GDK_KEY_space) {input_state -> space_key_pressed = false;} /* MFS_154 */
     if (event -> keyval == GDK_KEY_Shift_L) {input_state -> shift_key_pressed = false;} /* MFS_154 */
 /* MPE_TASK_22_ENTER_SPAWN_KEYRELEASE_BEGIN */
@@ -250,58 +263,98 @@ input_state -> enter_spawn_held = false;
 } gboolean on_mouse_movements (GtkWidget *widget, GdkEventMotion *event, gpointer user_data_stored) {
     (void) user_data_stored;
     input_status *input_state = &main_inputs;
-    if (input_state -> is_mouse_locked) {
-        static int last_warp_x = -1;
-        static int last_warp_y = -1;
-        int current_mouse_x = (int) event -> x_root;
-        int current_mouse_y = (int) event -> y_root;
-        if ((current_mouse_x == last_warp_x) && (current_mouse_y == last_warp_y)) {return FALSE;}
-        if (input_state -> suppress_mouse_delta) {
-            last_warp_x = current_mouse_x;
-            last_warp_y = current_mouse_y;
-            return FALSE;
-        } int widget_width  = gtk_widget_get_allocated_width  (widget);
+
+    /* Only process motion when locked (state 2). Ignore during transitions. */
+    if (input_state -> mouse_lock_state != 2) {
+        return FALSE;
+    }
+
+    /* Use widget-space coordinates for HiDPI consistency.
+     * event->x/y are in widget space (affected by scale factor).
+     * event->x_root/y_root are in screen space (not scaled). */
+    int current_mouse_x = (int) event -> x;
+    int current_mouse_y = (int) event -> y;
+
+    /* Suppress delta during menu/overlay interactions. */
+    if (input_state -> suppress_mouse_delta) {
+        input_state -> last_mouse_x = current_mouse_x;
+        input_state -> last_mouse_y = current_mouse_y;
+        input_state -> mouse_centered = true;
+        return FALSE;
+    }
+
+    /* First event after lock: baseline only, no delta. */
+    if (!input_state -> mouse_centered) {
+        input_state -> last_mouse_x = current_mouse_x;
+        input_state -> last_mouse_y = current_mouse_y;
+        input_state -> mouse_centered = true;
+        return FALSE;
+    }
+
+    /* Compute relative delta in widget space. */
+    int rel_dx = current_mouse_x - input_state -> last_mouse_x;
+    int rel_dy = current_mouse_y - input_state -> last_mouse_y;
+    input_state -> last_mouse_x = current_mouse_x;
+    input_state -> last_mouse_y = current_mouse_y;
+
+    /* Clamp single-event spikes (ballistics bursts, pointer jumps). */
+    if (rel_dx > 80) {rel_dx = 80;}
+    if (rel_dx < -80) {rel_dx = -80;}
+    if (rel_dy > 80) {rel_dy = 80;}
+    if (rel_dy < -80) {rel_dy = -80;}
+
+    if ((rel_dx != 0) || (rel_dy != 0)) {
+        input_state -> mouse_delta_accum_x += (float) rel_dx;
+        input_state -> mouse_delta_accum_y += -(float) rel_dy;  // Invert Y for camera pitch
+
+        /* Clamp per-frame accumulated total against flings. */
+        if (input_state -> mouse_delta_accum_x > 240.0f) {input_state -> mouse_delta_accum_x = 240.0f;}
+        if (input_state -> mouse_delta_accum_x < -240.0f) {input_state -> mouse_delta_accum_x = -240.0f;}
+        if (input_state -> mouse_delta_accum_y > 240.0f) {input_state -> mouse_delta_accum_y = 240.0f;}
+        if (input_state -> mouse_delta_accum_y < -240.0f) {input_state -> mouse_delta_accum_y = -240.0f;}
+    }
+
+    /* Edge-triggered recenter: only when cursor nears widget edge.
+     * Uses widget space (event->x/y vs allocated size) for HiDPI correctness. */
+    {
+        int widget_width = gtk_widget_get_allocated_width (widget);
         int widget_height = gtk_widget_get_allocated_height (widget);
-        int center_x = widget_width / 2;
-        int center_y = widget_height / 2;
-        int screen_origin_x, screen_origin_y;
-        gdk_window_get_origin (gtk_widget_get_window (widget), &screen_origin_x, &screen_origin_y);
-        int screen_center_x = screen_origin_x + center_x;
-        int screen_center_y = screen_origin_y + center_y;
-        int delta_x = current_mouse_x - screen_center_x;
-        int delta_y = current_mouse_y - screen_center_y;
-        int half_w = widget_width / 2;
-        int half_h = widget_height / 2;
-        if (delta_x >  half_w) {delta_x =  half_w;}
-        if (delta_x < -half_w) {delta_x = -half_w;}
-        if (delta_y >  half_h) {delta_y =  half_h;}
-        if (delta_y < -half_h) {delta_y = -half_h;}
-#ifdef _WIN32 /* WIN_PORT: gdk_device_warp not atomic on Win32; unclamped
-        * deltas cause violent camera snaps. */
-        if (delta_x > 80) {delta_x = 80;}
-        if (delta_x < -80) {delta_x = -80;}
-        if (delta_y > 80) {delta_y = 80;}
-        if (delta_y < -80) {delta_y = -80;}
-#endif
-        if ((delta_x != 0) || (delta_y != 0)) {
-            input_state -> mouse_delta_x = (float) delta_x;
-            input_state -> mouse_delta_y = -(float) delta_y;
-            last_warp_x = screen_center_x;
-            last_warp_y = screen_center_y;
-            mouse_lock_reset_centre (widget);
+        double edge_x = event -> x;
+        double edge_y = event -> y;
+        double margin_x = (double) widget_width / 5.0;
+        double margin_y = (double) widget_height / 5.0;
+        if ((margin_x >= 1.0) && (margin_y >= 1.0)) {
+            if ((edge_x < margin_x) ||
+                (edge_x > (double) widget_width - margin_x) ||
+                (edge_y < margin_y) ||
+                (edge_y > (double) widget_height - margin_y)) {
+                mouse_lock_reset_centre (widget);
+                input_state -> mouse_centered = false;
+            }
         }
-    } return FALSE;
+    }
+
+    return FALSE;
 } gboolean on_button_press (GtkWidget *widget, GdkEventButton *event, gpointer user_data_stored) {
     input_status *input_state = (input_status *) user_data_stored;
     /* Left click only locks the mouse (no selection action attached). */
     if (event -> button == 2) {input_state -> middle_mouse_button_clicked = true;}
     if (event -> button == 3) {input_state -> right_mouse_button_clicked = true;}
-    if (!(input_state -> is_mouse_locked)) {
+    if (event -> button == 1 && input_state -> mouse_lock_state == 0) {
+        input_state -> mouse_lock_state = 1;  // locking
         input_state -> mouse_delta_x = 0.0f;
         input_state -> mouse_delta_y = 0.0f;
+        input_state -> mouse_delta_accum_x = 0.0f;
+        input_state -> mouse_delta_accum_y = 0.0f;
+        input_state -> last_mouse_x = 0;
+        input_state -> last_mouse_y = 0;
+        input_state -> mouse_centered = false;
+        input_state -> suppress_mouse_delta = false;
         mouse_lock_enable (gtk_widget_get_toplevel (widget));
         input_state -> is_mouse_locked = true;
-    } return FALSE;
+        input_state -> mouse_lock_state = 2;  // locked
+    }
+    return FALSE;
 } gboolean on_button_release (GtkWidget *widget, GdkEventButton *event, gpointer user_data_stored) {
     (void) widget;
     input_status *input_state = (input_status *) user_data_stored;
@@ -320,12 +373,12 @@ input_state -> enter_spawn_held = false;
     input_state -> shift_key_pressed = false;
     input_state -> escape_key_pressed = false;
     input_state -> f_key_pressed = false;
-/* q/m/delete/t + g/h/c/v/b/n REMOVED (dead or deleted keybinds). */
+ /* q/m/delete/t REMOVED (dead or deleted keybinds). */
     input_state -> i_key_pressed = false;
     input_state -> j_key_pressed = false;
     input_state -> k_key_pressed = false;
     input_state -> l_key_pressed = false;
-    /* MPE_TASK_21_KEYBOARD_ONLY_FOCUS_BEGIN (r only) */
+     /* MPE_TASK_21_KEYBOARD_ONLY_FOCUS_BEGIN (r only) */
 input_state -> r_key_pressed = false;
 /* MPE_TASK_21_KEYBOARD_ONLY_FOCUS_END */
 input_state -> up_arrow_pressed = false;
@@ -349,17 +402,24 @@ input_state -> debug_terminal_pressed = false;
 /* MPE_TASK_22_ENTER_SPAWN_FOCUS_BEGIN */
 input_state -> enter_spawn_held = false;
 /* MPE_TASK_22_ENTER_SPAWN_FOCUS_END */
-/* A3_PATCH_02_FOCUS_LOSS */
+/* Full mouse state reset on focus loss. */
     input_state -> mouse_delta_x = 0.0f;
     input_state -> mouse_delta_y = 0.0f;
+    input_state -> mouse_delta_accum_x = 0.0f;
+    input_state -> mouse_delta_accum_y = 0.0f;
     input_state -> right_mouse_button_clicked = false;
     input_state -> middle_mouse_button_clicked = false;
     input_state -> suppress_mouse_delta = false;
+    input_state -> last_mouse_x = 0;
+    input_state -> last_mouse_y = 0;
+    input_state -> mouse_centered = false;
 
     if (input_state -> is_mouse_locked) {
+        input_state -> mouse_lock_state = 3;  // unlocking
         GtkWidget *a3_toplevel_widget = gtk_widget_get_toplevel (widget);
         mouse_lock_disable (a3_toplevel_widget);
         input_state -> is_mouse_locked = false;
+        input_state -> mouse_lock_state = 0;  // unlocked
     }
 
     return FALSE;
