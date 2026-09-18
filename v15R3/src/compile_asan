@@ -6,6 +6,7 @@ cd "$(dirname "$0")"
 make clean
 
 SAN_CFLAGS="$(pkg-config --cflags gtk+-3.0 epoxy) -I. -O1 -g -Wall -Wextra \
+  -ffp-contract=off \
   -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer"
 
 SAN_LIBS="$(pkg-config --libs gtk+-3.0 epoxy) -lm \

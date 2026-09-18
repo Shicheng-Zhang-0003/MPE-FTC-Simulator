@@ -72,6 +72,14 @@ void render_init() {
     sphere_instances = malloc(mpe_max_bodies * 19 * sizeof(float));
     cube_instances = malloc(mpe_max_bodies * 19 * sizeof(float));
     cylinder_instances = malloc(mpe_max_bodies * 19 * sizeof(float));
+    /* FIX-AUDIT: OOM used to set render_ok regardless and dereference NULL
+     * in render_scene_current. Fail loudly (red-screen fallback) instead. */
+    if (!sphere_instances || !cube_instances || !cylinder_instances) {
+        fprintf(stderr, "RENDER INIT FAILED: instance buffer OOM\n");
+        render_cleanup();
+        render_init_status = render_failed;
+        return;
+    }
     render_init_status = render_ok;
 }
 void render_cleanup(void) {

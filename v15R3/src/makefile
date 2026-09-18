@@ -44,7 +44,7 @@ install: engine
 	install -m 0755 engine $(DESTDIR)$(PREFIX)/bin/mpe-engine
 
 help:
-	@echo "targets: engine (default) | debug | release | install | clean"
+	@echo "targets: engine (default) | debug | release | install | clean | headless"
 	@echo "         test_<name> (build+run) | build_<name> (build only)"
 	@echo "         mpe-tui (terminal debugger + snapshot suite) | tui-smoke"
 	@echo "         flow: python3 ../../tools/test_runner.py"
@@ -79,17 +79,25 @@ tui-smoke: build_tui
 	./mpe-tui --snapshot 10 --scene tower > /dev/null
 	./mpe-tui --snapshot 10 --scene pendulum > /dev/null
 	./mpe-tui --snapshot 10 --scene springlab > /dev/null
+	./mpe-tui --snapshot 10 --scene ftc > /dev/null
 	@echo "[PASS] tui-smoke: all scenes dump finite state"
 
 .PHONY: clean debug release install help mpe-tui build_tui tui-smoke
 
 -include $(DEPS)
 
+# MPE headless smoke (no GTK/GL): drop + settle + finiteness verdict.
+build_headless: headless_main.c $(MPE_TEST_CORE)
+	$(CC) $(CFLAGS) -Dmpe_headless headless_main.c $(MPE_TEST_CORE) -lm -o test_headless
+test_headless: build_headless
+	./test_headless
+headless: test_headless
+
 # ---- MPE-only headless tests ----
 # Convention: build_<name> compiles only (used by tools/test_runner.py so a
 # failing test is never misreported as a build failure); test_<name> builds
 # and runs (human use).
-MPE_TEST_CORE := core/physics_world.c core/rigidbody.c \
+MPE_TEST_CORE := core/physics_world.c core/rigidbody.c core/det_math.c \
 	physics/collision_mechanics.c physics/collision_cylinder.c physics/broadphase.c physics/constraint.c physics/revolute_joint.c physics/depenetration.c physics/islands.c \
 	config/mpe_config.c config/mpe_config_schema.c scene/boundary.c
 
@@ -272,6 +280,7 @@ test_ftc_physics_validation: build_ftc_physics_validation
 	./test_ftc_physics_validation
 
 .PHONY: clean build_two_world test_two_world build_revolute test_revolute \
+	build_headless test_headless headless \
 	build_cylinder_drop test_cylinder_drop build_driven_wheel test_driven_wheel \
 	build_math3_inverse test_math3_inverse build_floor_collision_diag test_floor_collision_diag \
 	build_cylinder_sphere test_cylinder_sphere build_cylinder_cube test_cylinder_cube \
