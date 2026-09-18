@@ -20,25 +20,35 @@
  */
 #include <math.h>
 #include <stdbool.h>
+#include <fenv.h>
 
 /* TRUTH: count every libm fallback so desync is diagnosable, never silent.
- * Headless determinism test asserts these stay zero on in-contract scenes. */
-static unsigned long det_fallback_pow_count = 0;
-static unsigned long det_fallback_trig_count = 0;
+ * Headless determinism test asserts these stay zero on in-contract scenes.
+ * FIX-AUDIT: single process-wide counters (extern, defined once in
+ * det_math.c). A prior `static` definition gave every translation unit its
+ * own copy, so a zero-assert in one TU proved nothing engine-wide. */
+extern unsigned long det_fallback_pow_count;
+extern unsigned long det_fallback_trig_count;
 static inline void det_fallback_reset(void) {
     det_fallback_pow_count = 0;
     det_fallback_trig_count = 0;
 }
 
-/* TRUTH: pin FP state for cross-platform determinism. Portable subset only:
- * round-to-nearest (fesetround). x86/ARM denormal-flush differences (FTZ/DAZ)
- * are NOT pinned via MXCSR here: an earlier MXCSR builtin caused -O3
- * miscompiles/segfaults, and denormals cannot arise in truth paths anyway
- * (masses clamped >=1e-4, velocities finite-checked, tiny products flushed
- * by explicit epsilon guards). Document, don't crash. Idempotent. */
+/* TRUTH: pin FP state for cross-platform determinism. Portable subset:
+ * round-to-nearest via fesetround (errors ignored: already-nearest is a
+ * no-op; freestanding targets lack fenv and keep default rounding, which
+ * is round-to-nearest on every IEEE platform we ship). x86/ARM
+ * denormal-flush differences (FTZ/DAZ) are NOT pinned via MXCSR here: an
+ * earlier MXCSR builtin caused -O3 miscompiles/segfaults, and denormals
+ * cannot arise in truth paths anyway (masses clamped >=1e-4, velocities
+ * finite-checked, tiny products flushed by explicit epsilon guards).
+ * Idempotent. */
 static inline void det_pin_fp_state(void) {
-    /* fesetround is a no-op if already nearest; ignore errors (freestanding). */
+#if defined(FE_TONEAREST)
+    (void) fesetround(FE_TONEAREST);
+#else
     (void) 0;
+#endif
 }
 
 static inline double det_ln_pos(double x) {
@@ -47,6 +57,11 @@ static inline double det_ln_pos(double x) {
     }
     if (!(x > 0.0)) {
         return NAN;
+    }
+    /* FIX-AUDIT: extended-domain parity with libm. frexp(+INF) is
+     * implementation-defined and produced NaN here; libm log(+INF)=+INF. */
+    if (isinf(x)) {
+        return INFINITY;
     }
     int exponent = 0;
     double mantissa = frexp(x, &exponent); /* exact; m in [0.5, 1) */
@@ -67,7 +82,11 @@ static inline double det_ln_pos(double x) {
 
 static inline double det_exp_small(double x) {
     /* Taylor to x^12; |x|<=0.5 gives truncation ~5e-13. Guard: outside
-     * contract fall back to libm (counted) instead of silent garbage. */
+     * contract fall back to libm (counted) instead of silent garbage.
+     * FIX-AUDIT: extended-domain parity — libm exp(-INF)=0, exp(+INF)=+INF. */
+    if (isinf(x)) {
+        return (x < 0.0) ? 0.0 : x;
+    }
     if (!isfinite(x)) {
         return x;
     }
@@ -106,8 +125,9 @@ static inline double det_pow_retention(double base, double ex) {
 }
 
 static inline double det_sin_small(double x) {
+    /* FIX-AUDIT: libm sin(±INF)=NaN; the old `return x` leaked INF. */
     if (!isfinite(x)) {
-        return x;
+        return NAN;
     }
     if (x < -0.5 || x > 0.5) {
         det_fallback_trig_count++;
@@ -130,8 +150,9 @@ static inline double det_sin_small(double x) {
 }
 
 static inline double det_cos_small(double x) {
+    /* FIX-AUDIT: libm cos(±INF)=NaN; the old `return x` leaked INF. */
     if (!isfinite(x)) {
-        return x;
+        return NAN;
     }
     if (x < -0.5 || x > 0.5) {
         det_fallback_trig_count++;

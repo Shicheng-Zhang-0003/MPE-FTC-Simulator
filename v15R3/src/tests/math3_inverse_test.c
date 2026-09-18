@@ -70,16 +70,17 @@ int main(void) {
         printf("[B] FAIL: air wheel still not spinning — math3_inverse is broken\n");
     }
 
-    /* Overall */
+    /* Overall — FIX-AUDIT: gating. Both branches returned 0 even on
+     * failure, so CI could never catch an inverse regression. */
     if (test_a_pass && test_b_pass) {
         printf("[PASS] 093e: inertia pipeline works\n");
         return 0;
     } else if (test_a_pass && !test_b_pass) {
-        printf("[DIAG] math3_inverse is fine but something else zeroes I^-1\n");
-        return 0; /* non-gating */
+        printf("[FAIL] math3_inverse is fine but something else zeroes I^-1\n");
+        return 1;
     } else {
-        printf("[DIAG] math3_inverse is broken — needs fix in math3D.c\n");
-        return 0; /* non-gating */
+        printf("[FAIL] math3_inverse is broken — needs fix in math3D.c\n");
+        return 1;
     }
 }
 
