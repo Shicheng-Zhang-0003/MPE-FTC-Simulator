@@ -55,6 +55,8 @@ typedef struct {
      * leave is_mecanum=false and ignore roller_angle_rad. */
     bool is_mecanum;
     float roller_angle_rad;
+    /* MPE_FTC_078: wheel-drive tracking for wheel-lock axis stabilization */
+    bool driven_this_tick;
     uint32_t object_id;
     uint32_t object_generation;
 } rigidbody;

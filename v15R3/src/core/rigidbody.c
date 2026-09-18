@@ -368,6 +368,7 @@ void rigidbody_initialisation_sphere(rigidbody *rigid_body, float radius, float 
     rigid_body->kinematic = false;
     rigid_body->is_mecanum = false;
     rigid_body->roller_angle_rad = 0.0f;
+    rigid_body->driven_this_tick = false;
     /* FIX-AUDIT: use config body defaults (were hardcoded, registry dead). */
     rigid_body->friction_static = g_cfg.body_defaults.sphere_fric_s;
     rigid_body->friction_kinetic = g_cfg.body_defaults.sphere_fric_k;
@@ -796,6 +797,7 @@ void rigidbody_initialisation_cube(rigidbody *rigid_body, vector3 position_input
     rigid_body->kinematic = false;
     rigid_body->is_mecanum = false;
     rigid_body->roller_angle_rad = 0.0f;
+    rigid_body->driven_this_tick = false;
     /* FIX-AUDIT: use config body defaults (were hardcoded). */
     rigid_body->friction_static = g_cfg.body_defaults.cube_fric_s;
     rigid_body->friction_kinetic = g_cfg.body_defaults.cube_fric_k;
@@ -1015,6 +1017,7 @@ void rigidbody_initialisation_cylinder(rigidbody *rigid_body, float radius, floa
     rigid_body->kinematic = false;
     rigid_body->is_mecanum = false;
     rigid_body->roller_angle_rad = 0.0f;
+    rigid_body->driven_this_tick = false;
     /* FIX-AUDIT: use config cylinder defaults (new registry entries). */
     rigid_body->friction_static = g_cfg.body_defaults.cylinder_fric_s;
     rigid_body->friction_kinetic = g_cfg.body_defaults.cylinder_fric_k;

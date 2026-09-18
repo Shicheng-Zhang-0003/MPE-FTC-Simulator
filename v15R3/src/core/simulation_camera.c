@@ -26,10 +26,11 @@ void simulation_camera_tick(float frame_delta_time) {
     /* Perspective steering (mouse look) */
     float perspective_steering_sensitivity = g_cfg.camera.steer_sensitivity;
     if (main_inputs.is_mouse_locked) {
-        main_camera_fov.yaw += main_inputs.mouse_delta_x * perspective_steering_sensitivity;
-        main_camera_fov.pitch += main_inputs.mouse_delta_y * perspective_steering_sensitivity;
-        main_inputs.mouse_delta_x = 0.0f;
-        main_inputs.mouse_delta_y = 0.0f;
+        main_camera_fov.yaw += main_inputs.mouse_delta_accum_x * perspective_steering_sensitivity;
+        main_camera_fov.pitch += main_inputs.mouse_delta_accum_y * perspective_steering_sensitivity;
+        /* Clear per-frame accumulation buffer for next frame. */
+        main_inputs.mouse_delta_accum_x = 0.0f;
+        main_inputs.mouse_delta_accum_y = 0.0f;
     }
 
     /* IJKL emulation (Debug Mode) */
