@@ -70,7 +70,7 @@ TUI_CORE = $(MPE_TEST_CORE) $(SPRING_TEST_SRCS) $(TUI_FTC_CORE)
 # and the headless tests never require it. Only the mpe-tui target does.
 TUI_LIBS = -lm $(shell pkg-config --libs ncursesw 2>/dev/null || pkg-config --libs ncurses 2>/dev/null) $(shell pkg-config --libs epoxy 2>/dev/null)
 build_tui: $(TUI_SRCS) $(TUI_CORE)
-	@if ! pkg-config --exists ncursesw ncurses 2>/dev/null; then echo "error: mpe-tui needs ncurses:"; echo "  MSYS2 MINGW64: pacman -S mingw-w64-x86_64-ncurses"; echo "  Debian/Ubuntu: sudo apt install libncurses-dev"; exit 1; fi
+	@if ! pkg-config --exists ncursesw 2>/dev/null && ! pkg-config --exists ncurses 2>/dev/null; then echo "error: mpe-tui needs ncurses (neither ncursesw nor ncurses found):"; echo "  MSYS2 MINGW64: pacman -S mingw-w64-x86_64-ncurses"; echo "  Debian/Ubuntu: sudo apt install libncurses-dev"; exit 1; fi
 	$(CC) $(CFLAGS) -Dmpe_tui_main $(TUI_SRCS) $(TUI_CORE) $(TUI_LIBS) -o mpe-tui
 mpe-tui: build_tui
 tui-smoke: build_tui
