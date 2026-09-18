@@ -17,7 +17,8 @@ void cmd_stat(int argc, char **argv) {
     const char *target = argv[1];
     if (strstr(target, "world")) {
         term_printf("term_echo", "  File: /world\n");
-        term_printf(NULL, "  Size: %zu params    Blocks: 13    IO Block: config\n", g_registry_count);
+        term_printf(NULL, "  Size: %lu params    Blocks: 13    IO Block: config\n",
+                    (unsigned long) g_registry_count);
         term_printf(NULL, "  Mode: (0644/-rw-r--r--)  Uid: 0  Gid: 0\n");
         term_printf(NULL, "  Gravity: %.4f  Drag: %.4f\n", g_cfg.world.gravity, g_cfg.world.drag);
         term_printf(NULL, "  Objects: %d  Joints: %d  Mode: %s\n", (physics_world_get_primary()->body_count), (physics_world_get_primary()->spring_joint_count),
@@ -194,7 +195,7 @@ void cmd_file(int argc, char **argv) {
     }
     const char *target = argv[1];
     if (strstr(target, "world")) {
-        term_printf(NULL, "/world: physics configuration, %zu parameters\n", g_registry_count);
+        term_printf(NULL, "/world: physics configuration, %lu parameters\n", (unsigned long) g_registry_count);
         return;
     }
     if (strstr(target, "camera")) {

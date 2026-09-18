@@ -1199,7 +1199,9 @@ void microvim_render(GtkTextBuffer *buffer) {
             } else if (line[0] == '[') {
                 tag = "mv_section";
             } else {
-                char *eq = strchr(line, '=');
+                /* FIX-AUDIT: const-correct (line is const char*): the old
+                 * `char *eq` discarded the qualifier (-Wdiscarded-qualifiers). */
+                const char *eq = strchr(line, '=');
                 if (eq && (eq > line)) {
                     int key_len = (int) (eq - line);
                     gtk_text_buffer_get_end_iter(buffer, &end_iter);

@@ -14,7 +14,23 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+/* WIN_PORT: unistd/isatty/clock_gettime are POSIX. MSVC/MinGW map to io.h
+ * _isatty + GetTickCount64. */
+#ifdef _WIN32
+#include <io.h>
+#include <windows.h>
+#ifndef STDOUT_FILENO
+#define STDOUT_FILENO 1
+#endif
+#ifndef STDIN_FILENO
+#define STDIN_FILENO 0
+#endif
+#ifndef isatty
+#define isatty _isatty
+#endif
+#else
 #include <unistd.h>
+#endif
 
 #include "../ui_input/camera.h"
 #include "core/physics_world.h"
@@ -151,31 +167,29 @@ static void scene_springlab_only(physics_world *world) {    g_cfg.world.gravity 
 
 /* FTC mecanum robot scene: 4-mecanum chassis on foam tiles.
  * Exercises the full FTC drivetrain pipeline: motor subcycling,
- * traction clamping, anisotropic contact, revolute constraints,
- * and wheel-lock. Built via `make test_ftc_mecanum`. */
+ * traction clamping, revolute constraints, and wheel-lock. */
 static void scene_ftc_only(physics_world *world) {
+    const float dt = 1.0f / 60.0f;
     scene_floor(world);
     constraint_pool_init(world);
     joint_init_pool(world);
-    /* Create an FTC robot with mecanum drive. The robot spawns at
-     * rest height above the floor with 4 mecanum wheels. */
+    ftc_ensure_field_walls(world);
+    /* FIX-AUDIT: spawn at rest height (was y=0: interpenetrated) and run
+     * the FULL pipeline (was ftc_robot_update only: no traction, damping,
+     * rolling resistance, or odometry despite the comment claiming it). */
     ftc_robot robot;
     memset(&robot, 0, sizeof(ftc_robot));
-    ftc_robot_create(world, &robot, 0.0f, 0.0f, 0.0f, MOTOR_GB_5203_19_2);
+    ftc_robot_create(world, &robot, 0.0f, ftc_robot_rest_height(), -1.0f, MOTOR_GB_5203_19_2);
     /* Apply forward command to all wheels for a few seconds. */
-    float commands[4] = {0.5f, 0.5f, 0.5f, 0.5f};
-    ftc_robot_set_wheel_commands(&robot, commands, 4);
-    /* Run 300 ticks (5 seconds) to observe traction and settling. */
-    const float dt = 1.0f / 60.0f;
     for (int i = 0; i < 300; i++) {
-        ftc_robot_update(world, &robot, dt);
+        drivetrain_mecanum(&robot, 0.5f, 0.0f, 0.0f);
+        drivetrain_update(world, &robot, dt);
         physics_world_step(world, dt);
     }
     /* Zero commands to observe idle hold. */
-    memset(commands, 0, sizeof(commands));
-    ftc_robot_set_wheel_commands(&robot, commands, 4);
     for (int i = 0; i < 120; i++) {
-        ftc_robot_update(world, &robot, dt);
+        drivetrain_mecanum(&robot, 0.0f, 0.0f, 0.0f);
+        drivetrain_update(world, &robot, dt);
         physics_world_step(world, dt);
     }
 }
@@ -278,9 +292,15 @@ static int build_scene(physics_world *world, const char *name) {
 /* ------------------------------------------------------------------ */
 
 static double now_seconds(void) {
+#ifdef _WIN32
+    /* WIN_PORT: MinGW-w64 new enough has clock_gettime, old MinGW and MSVC
+     * do not — GetTickCount64 is universal on the Windows path. */
+    return (double) GetTickCount64() / 1000.0;
+#else
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (double) ts.tv_sec + (double) ts.tv_nsec * 1e-9;
+#endif
 }
 
 int main(int argc, char *argv[]) {

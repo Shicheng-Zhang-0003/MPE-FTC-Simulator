@@ -10,9 +10,7 @@
 #ifndef F_OK
 #define F_OK 0
 #endif
-#ifdef _WIN32
 #define access(p, m) _access(p, m)
-#endif
 #else
 #include <unistd.h>
 #endif
@@ -84,7 +82,7 @@ void validation_report_print(void) {
            main_inputs.marked_joint_object_index);
     /* MPE_TASK_39_CONFIG_REPORT_BEGIN */
     printf("[A3] config file: %s\n", (access("status/engine.cfg", F_OK) == 0) ? "present" : "absent");
-    printf("[A3] config params: %zu registered\n", g_registry_count);
+    printf("[A3] config params: %lu registered\n", (unsigned long) g_registry_count);
     for (size_t cfg_i = 0; cfg_i < g_registry_count; cfg_i++) {
         if (g_registry[cfg_i].type == p_int) {
             printf("[A3]   %s = %d\n", g_registry[cfg_i].key, *(int *) g_registry[cfg_i].storage);
