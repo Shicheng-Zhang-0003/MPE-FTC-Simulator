@@ -2,15 +2,13 @@
 #include "mpe_engine.h"
 camera main_camera_fov;
 input_status main_inputs;
-static guint physics_timeout_id = 0;
 
 static void on_main_window_destroy(GtkWidget *widget, gpointer user_data) {
     (void) widget;
     (void) user_data;
-    if (physics_timeout_id) {
-        g_source_remove(physics_timeout_id);
-        physics_timeout_id = 0;
-    }
+    /* Stop physics thread first */
+    physics_thread_stop();
+
     render_cleanup();
     physics_world_cleanup(physics_world_get_primary());
     gtk_main_quit();
@@ -92,8 +90,15 @@ int main_algorithm(int argc, char *argv[]) {
     //Focus and Event Catching
     gtk_widget_set_can_focus(main_window, TRUE);
     gtk_widget_grab_focus(main_window);
-    //Physics Step Loop (16ms)
-    physics_timeout_id = g_timeout_add(16, physics_step_increment, gl_area_widget);
+    /* Start physics thread (decoupled from GTK main loop).
+     * Runs at fixed 60Hz with high-resolution timer. */
+    physics_thread_start();
+
+/* Drive the physics step, input dispatch, and UI update at ~60fps.
+     * This is the main GTK timeout callback — it wakes the physics
+     * thread, dispatches input, updates the overlay, and redraws. */
+    g_timeout_add(16, physics_step_increment, main_window);
+
     //Show Window
     gtk_widget_show_all(main_window);
     gtk_widget_grab_focus(main_window);

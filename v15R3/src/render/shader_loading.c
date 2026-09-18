@@ -2,6 +2,7 @@
 #include <epoxy/gl.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <unistd.h>
 GLuint compile_shader(const char *shader_source, GLenum shader_type) {
     GLuint shader_object = glCreateShader(shader_type);
     glShaderSource(shader_object, 1, &shader_source, NULL);
