@@ -78,8 +78,11 @@ typedef struct {
         /* max_restitution_bias REMOVED (dead knob; Newton bound is physical). */
         float static_friction_thresh;
         float warm_start_match_dist_sq;
-        /* FTC mecanum transplant: roller free-axis friction (near 0). */
+        /* FTC mecanum: roller-axis friction (= floor_friction_s for traction). */
         float roller_friction_coeff;
+        /* MPE_FTC_078: wheel-lock threshold - angular velocity below
+         * this magnitude about the axle is locked to prevent wheel pitching. */
+        float wheel_lock_omega_thresh;
     } solver;
 
     struct {

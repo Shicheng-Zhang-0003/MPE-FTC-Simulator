@@ -39,10 +39,10 @@ static mpe_param s_registry[] = {
      cat_world, &g_cfg.world.drag, 1.0, 0.1, 1.0, false},
 
     {"world.floor_friction_s", "Floor Friction (Static)", "Static friction coefficient for floor contacts", p_float,
-     cat_world, &g_cfg.world.floor_friction_s, 0.2, 0.0, 5.0, false},
+     cat_world, &g_cfg.world.floor_friction_s, 0.8, 0.0, 5.0, false},
 
     {"world.floor_friction_k", "Floor Friction (Kinetic)", "Kinetic friction coefficient for floor contacts", p_float,
-     cat_world, &g_cfg.world.floor_friction_k, 0.1, 0.0, 5.0, false},
+     cat_world, &g_cfg.world.floor_friction_k, 0.6, 0.0, 5.0, false},
      {"world.rolling_resistance_coeff", "Rolling Resistance Coeff", "Coulomb rolling resistance (foam tiles + soft silicone rollers ~0.03; asphalt/car ~0.01; 0 = free roll)", p_float,
      cat_world, &g_cfg.world.rolling_resistance_coeff, 0.03f, 0.0, 5.0, false},
     {"world.angular_damping_scale", "Angular Damping Scale", "NON-PHYSICAL game damping (1.0=truth, off). Extra rotary retention with no fluid basis; air damps translation, barely rotation.", p_float,
@@ -115,12 +115,16 @@ static mpe_param s_registry[] = {
     {"solver.warm_start_match_dist_sq", "Warm-Start Match Dist^2", "Max distance^2 for cached contact matching",
      p_float, cat_solver, &g_cfg.solver.warm_start_match_dist_sq, 0.0025, 0.0, 0.01, true},
 
-    {"solver.roller_friction_coeff", "Roller Free-Axis Friction",
-     "Mecanum roller free-slide mu (near 0 = true roller)", p_float, cat_solver,
-     &g_cfg.solver.roller_friction_coeff, 0.03, 0.0, 1.0, true},
+{"solver.roller_friction_coeff", "Roller Free-Axis Friction",
+     "Mecanum roller free-slide mu (set = floor_friction_s for FTC traction)", p_float, cat_solver,
+     &g_cfg.solver.roller_friction_coeff, 0.8, 0.0, 5.0, true},
 
-    /* ============================================================
-     * cat_depenetration
+     {"solver.wheel_lock_omega_thresh", "Wheel Lock Omega Threshold",
+      "Angular velocity (rad/s) below which wheel is locked to axle to prevent pitching", p_float, cat_solver,
+      &g_cfg.solver.wheel_lock_omega_thresh, 0.5f, 0.0f, 10.0f, true},
+
+     /* ============================================================
+      * cat_depenetration
      * ============================================================ */
     {"depenetration.correction_factor", "Correction Factor", "Fraction of penetration corrected per pass", p_float,
       cat_depenetration, &g_cfg.depenetration.correction_factor, 0.35, 0.0, 1.0, true},
