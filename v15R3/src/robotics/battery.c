@@ -41,9 +41,16 @@ void battery_drain(battery *b, float total_current_draw, float dt) {
     if ((!b) || (dt <= 0.0f)) {
         return;
     }
-    /* True coulomb counting + mild Peukert. No 0.25 life extender. */
-    float peukert_current = powf(fmaxf(total_current_draw, 0.0f), 1.1f);
-    float amp_hours_used = (peukert_current * dt) / 3600.0f;
+    /* True coulomb counting + mild Peukert. No 0.25 life extender.
+     * FIX-AUDIT: negative draw (regenerative braking) recharges linearly
+     * instead of being clamped to zero drain. */
+    float amp_hours_used;
+    if (total_current_draw < 0.0f) {
+        amp_hours_used = (total_current_draw * dt) / 3600.0f;
+    } else {
+        float peukert_current = powf(fmaxf(total_current_draw, 0.0f), 1.1f);
+        amp_hours_used = (peukert_current * dt) / 3600.0f;
+    }
     b->charge_fraction -= amp_hours_used / b->capacity_ah;
     if (b->charge_fraction < 0.0f) {
         b->charge_fraction = 0.0f;
