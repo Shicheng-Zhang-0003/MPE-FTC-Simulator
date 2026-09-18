@@ -115,9 +115,10 @@ static mpe_param s_registry[] = {
     {"solver.warm_start_match_dist_sq", "Warm-Start Match Dist^2", "Max distance^2 for cached contact matching",
      p_float, cat_solver, &g_cfg.solver.warm_start_match_dist_sq, 0.0025, 0.0, 0.01, true},
 
-{"solver.roller_friction_coeff", "Roller Free-Axis Friction",
-     "Mecanum roller free-slide mu (set = floor_friction_s for FTC traction)", p_float, cat_solver,
-     &g_cfg.solver.roller_friction_coeff, 0.8, 0.0, 5.0, true},
+{"solver.roller_friction_coeff", "Roller Grip Mu",
+     "Mecanum wheel grip mu: drive traction cap + strafe/yaw sizing (contact solver uses body/floor frictions separately)",
+     p_float, cat_solver,
+     &g_cfg.solver.roller_friction_coeff, 1.0, 0.0, 5.0, true},
 
      {"solver.wheel_lock_omega_thresh", "Wheel Lock Omega Threshold",
       "Angular velocity (rad/s) below which wheel is locked to axle to prevent pitching", p_float, cat_solver,

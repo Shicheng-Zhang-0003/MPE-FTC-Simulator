@@ -704,7 +704,7 @@ void cmd_tee(int argc, char **argv) {
         if (output_file) {
             fputs(captured, output_file);
             fclose(output_file);
-            term_printf("term_ok", "tee: wrote %zu bytes to %s\n", strlen(captured), resolved);
+            term_printf("term_ok", "tee: wrote %lu bytes to %s\n", (unsigned long) strlen(captured), resolved);
         } else {
             term_printf("term_err", "mpe: tee: %s: cannot open for writing\n", resolved);
         }

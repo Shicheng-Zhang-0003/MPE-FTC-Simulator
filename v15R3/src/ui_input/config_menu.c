@@ -159,38 +159,46 @@ void config_menu_render(char *buffer, size_t buffer_size) {
         return;
     }
     if (config_menu_level == 1) {
+        /* WIN_PORT: %zu is unsupported by MSVCRT printf — print counts via
+         * unsigned long. Same for every %zu in this file. */
         snprintf(buffer, buffer_size,
                  "-- Config Menu (Page 1) --\n"
-                 "1: World (%zu)\n"
-                 "2: Timestep (%zu)\n"
-                 "3: Sleep (%zu)\n"
-                 "4: Solver (%zu)\n"
-                 "5: Depenetration (%zu)\n"
-                 "7: Broadphase (%zu)\n"
-                 "8: Joints (%zu)\n"
-                 "9: Boundary (%zu)\n"
+                 "1: World (%lu)\n"
+                 "2: Timestep (%lu)\n"
+                 "3: Sleep (%lu)\n"
+                 "4: Solver (%lu)\n"
+                 "5: Depenetration (%lu)\n"
+                 "7: Broadphase (%lu)\n"
+                 "8: Joints (%lu)\n"
+                 "9: Boundary (%lu)\n"
                  "0: More...\n"
                  "6: Close",
-                 mpe_config_count_by_category(cat_world), mpe_config_count_by_category(cat_timestep),
-                 mpe_config_count_by_category(cat_sleep), mpe_config_count_by_category(cat_solver),
-                 mpe_config_count_by_category(cat_depenetration), mpe_config_count_by_category(cat_broadphase),
-                 mpe_config_count_by_category(cat_joints), mpe_config_count_by_category(cat_boundary));
+                 (unsigned long) mpe_config_count_by_category(cat_world),
+                 (unsigned long) mpe_config_count_by_category(cat_timestep),
+                 (unsigned long) mpe_config_count_by_category(cat_sleep),
+                 (unsigned long) mpe_config_count_by_category(cat_solver),
+                 (unsigned long) mpe_config_count_by_category(cat_depenetration),
+                 (unsigned long) mpe_config_count_by_category(cat_broadphase),
+                 (unsigned long) mpe_config_count_by_category(cat_joints),
+                 (unsigned long) mpe_config_count_by_category(cat_boundary));
     } else if (config_menu_level == 2) {
         snprintf(buffer, buffer_size,
                  "-- Config Menu (Page 2) --\n"
-                 "1: Spawner (%zu)\n"
-                 "2: Body Defaults (%zu)\n"
-                 "3: Camera (%zu)\n"
-                 "4: Render (%zu)\n"
-                 "5: UI (%zu)\n"
+                 "1: Spawner (%lu)\n"
+                 "2: Body Defaults (%lu)\n"
+                 "3: Camera (%lu)\n"
+                 "4: Render (%lu)\n"
+                 "5: UI (%lu)\n"
                  "7: Save Config\n"
                  "8: Reset Defaults\n"
                  "9: Back\n"
                  "0: Back\n"
                  "6: Close",
-                 mpe_config_count_by_category(cat_spawner), mpe_config_count_by_category(cat_body_defaults),
-                 mpe_config_count_by_category(cat_camera), mpe_config_count_by_category(cat_render),
-                 mpe_config_count_by_category(cat_ui));
+                 (unsigned long) mpe_config_count_by_category(cat_spawner),
+                 (unsigned long) mpe_config_count_by_category(cat_body_defaults),
+                 (unsigned long) mpe_config_count_by_category(cat_camera),
+                 (unsigned long) mpe_config_count_by_category(cat_render),
+                 (unsigned long) mpe_config_count_by_category(cat_ui));
     } else if (config_menu_level >= 10) {
         int category = config_menu_level - 10;
         static const mpe_param *category_params[64];
@@ -210,11 +218,11 @@ void config_menu_render(char *buffer, size_t buffer_size) {
             }
             const char *debug_tag = (p->debug_only) ? " [D]" : "";
             if (p->type == p_int) {
-                offset += snprintf(buffer + offset, buffer_size - offset, "%zu: %s = %d%s\n", i + 1, p->display,
-                                   (int) val, debug_tag);
+                offset += snprintf(buffer + offset, buffer_size - offset, "%lu: %s = %d%s\n", (unsigned long) (i + 1),
+                                   p->display, (int) val, debug_tag);
             } else {
-                offset += snprintf(buffer + offset, buffer_size - offset, "%zu: %s = %.4f%s\n", i + 1, p->display, val,
-                                   debug_tag);
+                offset += snprintf(buffer + offset, buffer_size - offset, "%lu: %s = %.4f%s\n",
+                                   (unsigned long) (i + 1), p->display, val, debug_tag);
             }
         }
         snprintf(buffer + offset, buffer_size - offset, "0: Back | 6: Close");
