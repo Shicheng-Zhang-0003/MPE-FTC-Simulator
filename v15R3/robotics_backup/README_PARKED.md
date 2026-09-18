@@ -1,19 +1,22 @@
-# MFS robotics — parked during the MPE-only run
+# MFS robotics — parked history (NOT the live code)
 
-The robot was bouncing on wheel contact (contact/friction tuning mid-transition),
-so all robotics-specific code was moved here, out of the `src/` build:
+This directory is a pre-transplant snapshot, kept for history and for the
+unwired diagnostic tests. It is NOT part of any build (no makefile or
+`tools/test_runner.py` target references it).
 
 - `robotics/` — battery, motor, motor presets, drivetrain, robot, GUI registry
-- `gamepad/` — F310 joystick drive input (`ui_input/gamepad.*`)
-- `tests_robotics/` — teleop, mecanum, ftc integration/debug, tank turn,
-  odometry (+diags), idle-spin diags, physics truth (+diag)
+  (pre-transplant copies: 12V/9.2A presets, NiMH model, and geometry all
+  DIVERGED from live — do not copy back without diffing)
+- `gamepad/` — evdev-only F310 snapshot (live `src/ui_input/gamepad.c` adds
+  Win32 XInput + reconnect)
+- `tests_robotics/` — 12 unwired diags (teleop, mecanum, integration/debug,
+  tank turn, odometry (+diags), idle-spin diags, physics truth (+diag))
 
-MPE core keeps parked hooks (never fire without this code): `is_mecanum` /
-`roller_angle_rad` / `driven_this_tick` fields, `rigidbody_set_mecanum()`,
-`solver.wheel_lock_omega_thresh`. Live MFS behavior removed from the core:
-wheel-lock loop (`core/physics_world.c`), mecanum roller tangent
-(`physics/collision_mechanics.c`), gamepad/drive dispatch, robot HUD,
-`touch robot`.
+The LIVE robotics code is `v15R3/src/robotics/` (linked into the engine via
+`ENGINE_SRCS`, the `mpe-tui` FTC scene, and 7 `build_ftc_*` test targets).
+MPE↔FTC coupling (wheel-lock loop, mecanum roller tangent, `is_mecanum` /
+`roller_angle_rad` / `driven_this_tick`, gamepad dispatch, `touch robot`)
+is live in `src/`, not removed.
 
 Drive-tuning notes for the MFS return: slop-gated zero-depth contacts
 (`penetration_slop`) restored persistent wheel friction (teleop 0.92 m,

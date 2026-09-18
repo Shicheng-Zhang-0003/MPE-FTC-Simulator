@@ -259,7 +259,7 @@ make
 
 ## 📜 Version History
 
-- **v15R3 (release)** — configuration system, physics-truth pass, full constraint framework, TUI debugger + snapshot suite, 29/29 headless green. *(this tree)*
+- **v15R3 (release)** — configuration system, physics-truth pass, full constraint framework, TUI debugger + snapshot suite, 36/36 headless green. *(this tree)*
 - **v15R2** — config-system hardening + MFS robotics (prior RC, parked in `robotics_backup/`).
 - **v1.4 Alpha RC3** — domain-driven restructure, spatial-hash broadphase, physics-world encapsulation.
 - **v1.4 Alpha 2** — warm-starting solver, multi-point contact manifolds.
@@ -279,7 +279,7 @@ See `evolution.txt` for the full lineage back to stage 0. Release notes: [`v15R3
 
 ## 🧪 Headless test suite
 
-MPE ships a headless regression suite (no GTK/OpenGL required) — **29/29 green**:
+MPE ships a headless regression suite (no GTK/OpenGL required) — **36/36 green** (29 MPE/physics + `frustum` + 7 FTC robotics):
 
 | Test | Proves |
 |------|--------|
@@ -309,6 +309,11 @@ MPE ships a headless regression suite (no GTK/OpenGL required) — **29/29 green
 | `sleep_contact_wake` | Slow pushers wake sleepers; resting contact doesn't churn |
 | `f11_torture` | Deterministic config extremes without corruption |
 | `frustum` | Frustum culling math |
+| `ftc_teleop` / `ftc_mecanum` / `ftc_tank_turn` | Tank, strafe, and turn drive truth |
+| `ftc_odometry` | Encoder odometry tracks ground truth (≤20%) |
+| `ftc_stress` | Scripted multi-axis drive: smooth, bounded, settles |
+| `ftc_registry` | GUI spawn/drive/count path |
+| `ftc_physics_validation` | Motor/contact/idle/strafe validation |
 
 Run with `python3 tools/test_runner.py`.
 
