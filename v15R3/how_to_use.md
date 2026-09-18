@@ -21,7 +21,7 @@ The engine has two modes, toggled with the `0` key at any time.
 
 **Game Mode** is the default. Gravity applies to the camera, WASD movement is grounded, you can jump, and the world has boundaries — objects and the camera are contained within a 500×500×500 unit box.
 
-**Debug Mode** removes all boundaries and gravity from the camera. WASD flies freely in the direction you're looking. Use this for placing objects precisely, inspecting scenes from any angle, or spawning objects in mid-air.
+**Debug Mode** frees the camera (fly, no gravity, no bounds). Use this for placing objects precisely, inspecting scenes from any angle, or spawning objects in mid-air. Physics bodies stay inside the 500³ box in both modes.
 
 The current mode is shown in the top-left status bar.
 
@@ -184,7 +184,7 @@ every scene dumps finite state.
 
 ## Configuration System (Key 6)
 
-Press `6` to open the **Configuration Menu**. This provides live access to all 78 tunable engine parameters.
+Press `6` to open the **Configuration Menu**. This provides live access to all 80 tunable engine parameters.
 
 The menu is organised into 13 categories:
 
@@ -224,7 +224,7 @@ In the debug terminal:
 
 ### F11 Config Torture Test
 
-Press `F11` to randomise all 78 tunables to extreme bounded values and run
+Press `F11` to randomise all 80 tunables to extreme bounded values and run
 a 60-second long-run validation. This stress-tests the engine under
 adversarial parameter combinations (each press uses the next seed, printed
 for bisection). F11 is a robustness verdict: PASS means no NaN and nothing

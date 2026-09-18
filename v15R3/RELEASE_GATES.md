@@ -111,7 +111,7 @@ They should be recorded as post-stable work items.
 
 ### 10. Configuration System
 - [X] Config menu (key 6) opens and navigates correctly.
-- [X] All 78 tunable parameters are editable via the menu.
+- [X] All 80 tunable parameters are editable via the menu.
 - [X] Debug-only parameters are refused in Game Mode.
 - [X] Config saves to `status/engine.cfg` on exit.
 - [X] Config loads on startup and overrides defaults.

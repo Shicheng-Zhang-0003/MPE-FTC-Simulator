@@ -962,7 +962,7 @@ void tui_render_help(tui_debugger_t *dbg) {
         "NON-INTERACTIVE SUITE (no TTY needed):",
         "  mpe-tui --snapshot [ticks] [--scene NAME]   one full state dump",
         "  mpe-tui --stream T [--every K] [--scene N]  dumps every K ticks",
-        "  scenes: demo tower pendulum springlab f10 (all scriptable/diffable)",
+        "  scenes: demo tower pendulum springlab f10 ftc (all scriptable/diffable)",
         NULL,
     };
     int h, w;
