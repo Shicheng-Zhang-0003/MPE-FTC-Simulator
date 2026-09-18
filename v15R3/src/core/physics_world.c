@@ -39,9 +39,13 @@ void physics_world_init(physics_world *world) {
     }
     det_pin_fp_state();
     memset(world, 0, sizeof(physics_world)); /* MPE_FTC_076a */
+    /* FIX-AUDIT: capacity is only advertised when the backing store exists.
+     * Previously body_capacity=mpe_max_bodies was assigned even on malloc
+     * failure, so validation_report printed capacity=16384 for a dead
+     * world (callers already NULL-check bodies, so no crash — but a lie). */
     if (!world->bodies) {
         world->bodies = (rigidbody *) malloc((size_t) mpe_max_bodies * sizeof(rigidbody));
-        world->body_capacity = mpe_max_bodies;
+        world->body_capacity = (world->bodies) ? mpe_max_bodies : 0;
     }
     if (!world->world_contact_cache) {
         world->world_contact_cache =
@@ -713,7 +717,11 @@ static void physics_world_step_single(physics_world *world, float dt) {
      * (drag==1): with damping or attached spring/motor forces the -1/2*g
      * term is not the true applied acceleration, so plain Euler applies. */
     float grav_half = -0.5f * step_gravity;
-    bool vacuum_exact = (step_drag == 1.0f);
+    /* FIX-AUDIT: tolerance band, not exact float equality. A config
+     * serialization round-off (0.99999994) used to silently disable the
+     * 1/2*g*dt^2 correction and reintroduce ~1.36 mm/tick symplectic bias
+     * with no warning. */
+    bool vacuum_exact = (fabsf(step_drag - 1.0f) < 1e-6f);
     for (int i = 0; i < world->body_count; i++) {
         float step_dt = dt;
         if ((world->ccd_time_remaining) && (world->ccd_time_remaining[i] < step_dt) &&
@@ -823,6 +831,15 @@ int physics_world_add_boundary_walls(physics_world *world,
     if ((north < 0) || (south < 0) || (east < 0) || (west < 0)) {
         return -1;
     }
+
+    /* FIX-AUDIT: field walls are dead (foam/wood perimeter, e=0), not the
+     * 0.5-restitution default cubes inherit. A bouncy wall turns every
+     * full-speed touch into a Poisson kickback (the "clunk"); grip comes
+     * from friction, never bounce. */
+    world->bodies[north].restitution = 0.0f;
+    world->bodies[south].restitution = 0.0f;
+    world->bodies[east].restitution = 0.0f;
+    world->bodies[west].restitution = 0.0f;
 
     return 0;
 }

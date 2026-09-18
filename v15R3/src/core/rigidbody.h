@@ -45,10 +45,12 @@ typedef struct {
     /* MPE_TASK_V15R2_NICE_VALUE_BEGIN */
     int nice_value; /* NON-PHYSICAL settle tool (0=truth, off). Positive = extra
                      * numerical damping for rapid game settling, NOT fluid
-                     * mechanics. Curve: factor=(1-0.002*nice)^(dt*60).
-                     * nice=19 halves every ~18 ticks: intentionally strong for
-                     * gameplay; use 0 for physics truth. Negative clamps to 0
-                     * (no anti-damping/energy injection, ever). */
+                     * mechanics. Curve: factor=(1-0.002*nice)^(dt*60), with
+                     * the base floored at 0.9 (nice>=50 all damp identically;
+                     * game-only, default 0). nice=19 halves every ~18 ticks:
+                     * intentionally strong for gameplay; use 0 for physics
+                     * truth. Negative clamps to 0 (no anti-damping/energy
+                     * injection, ever). */
     /* MPE_TASK_V15R2_NICE_VALUE_END */
     /* FTC mecanum extension (transplanted from MFS, physics-fixed): continuous
      * anisotropic contact patch approximating roller wheels. Non-mecanum bodies
