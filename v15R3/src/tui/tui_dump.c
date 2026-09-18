@@ -8,6 +8,15 @@
  * Sections: [engine] truth params + totals, [body i] full characteristics
  * and mathematics, [springs], [constraints], [pairs] relative positions,
  * [islands], [stats] solver/broadphase diagnostics, [result].
+ *
+ * FTC Robotics Sections (when --scene ftc):
+ * - [ftc_robot] drivetrain type, wheel count, chassis body index
+ * - [ftc_wheels] per-wheel: motor command, torque, angular velocity, roller angle
+ * - [ftc_traction] per-wheel: traction force, rolling direction, contact normal
+ * - [ftc_chassis] chassis velocity, angular velocity, damping forces
+ * - [ftc_odometry] encoder-based position estimate (odom_x, odom_z, odom_theta)
+ * - [ftc_battery] terminal voltage, current draw, bus limit status
+ * - [ftc_friction] floor friction s/k, roller friction, wheel-lock threshold
  */
 #include "tui_debugger.h"
 #include "../config/mpe_config.h"

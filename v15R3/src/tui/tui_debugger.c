@@ -9,6 +9,13 @@
  *
  * Plain-text snapshot/stream output lives in tui_dump.c and shares the
  * formatting helpers below, so piped output and the live UI agree.
+ *
+ * FTC Robotics Display (when --scene ftc):
+ * - OVERVIEW shows FTC robot status: drivetrain type, wheel count
+ * - OBJECT_DETAIL shows mecanum properties: roller angle, driven_this_tick
+ * - Joint detail shows revolute constraints for wheel hinges
+ * - Stats show FTC-specific metrics: traction force, wheel-lock status
+ * - Friction display shows anisotropic mu_grip/mu_free values
  */
 #include "tui_debugger.h"
 #include "../config/mpe_config.h"
