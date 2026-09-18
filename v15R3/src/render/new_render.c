@@ -258,4 +258,5 @@ void render_scene_current(int widget_width, int widget_height) {
     glBindVertexArray(0);
     spring_joint_render(utility_shader_program, view_matrix, projection_matrix);
     wireframe_render_selected_object(utility_shader_program, view_matrix, projection_matrix);
+    wireframe_render_robot_noses(utility_shader_program, view_matrix, projection_matrix);
 }

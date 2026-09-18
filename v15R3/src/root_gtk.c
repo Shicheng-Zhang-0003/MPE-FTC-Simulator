@@ -52,6 +52,12 @@ int main_algorithm(int argc, char *argv[]) {
 #else
     gamepad_get_primary()->invert_left_y = true;
 #endif
+    /* FIX-STICK: robot-relative lateral/yaw. Physics strafe+/rotate+ mean
+     * robot-LEFT / CCW, but both sticks read right-positive on every pad,
+     * so stick-right drove robot-left (both axes felt inverted). Negate
+     * here at the input layer; physics, IK, and odometry stay untouched. */
+    gamepad_get_primary()->invert_left_x = true;
+    gamepad_get_primary()->invert_right_x = true;
     /* MPE_TASK_34_CONFIG_LOAD_BEGIN */
     if (mpe_config_load("status/engine.cfg")) {
         printf("[config] loaded status/engine.cfg\n");
@@ -63,8 +69,12 @@ int main_algorithm(int argc, char *argv[]) {
     /* Primary simulation world owns all sim state (bodies, joints,
      * caches, scratch). Scene code assumes it initialized. */
     physics_world_init(physics_world_get_primary());
-    //Camera Init
-    initialize_camera(&main_camera_fov, (vector3){0.0f, 20.0f, 50.0f});
+    //Camera Init: chase default behind the robot (robot faces +Z, so the
+    //camera sits at -Z looking +Z: stick directions match the screen and
+    //the nose marker reads unambiguously). Free mouse-look unchanged.
+    initialize_camera(&main_camera_fov, (vector3){0.0f, 20.0f, -50.0f});
+    main_camera_fov.yaw = 90.0f; //Straight Forwards (Positive Z Axis)
+    camera_update_vectors(&main_camera_fov);
     initialize_input(&main_inputs);
     //Widgeting
     GtkWidget *main_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);

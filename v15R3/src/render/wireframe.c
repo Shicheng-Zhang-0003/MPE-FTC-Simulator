@@ -121,3 +121,54 @@ void wireframe_render_selected_object(GLuint shader_program, math4 view_matrix, 
     wireframe_render_object(shader_program, view_matrix, projection_matrix, &(physics_world_get_primary()->bodies)[selected_object],
                             (vector3){1.0f, 1.0f, 0.0f});
 }
+
+void wireframe_render_robot_noses(GLuint shader_program, math4 view_matrix, math4 projection_matrix) {
+    if (gui_robot_get_count() <= 0) {
+        return;
+    }
+    glUseProgram(shader_program);
+    a3_wire_cache_missing_uniforms(shader_program);
+    a3_wire_cache_uniforms(shader_program);
+    float view_matrix_flat_array[16];
+    float projection_matrix_flat_array[16];
+    math4_to_flat_array(view_matrix, view_matrix_flat_array);
+    math4_to_flat_array(projection_matrix, projection_matrix_flat_array);
+    glUniformMatrix4fv(a3_wire_uniform_viewframe, 1, GL_FALSE, view_matrix_flat_array);
+    glUniformMatrix4fv(a3_wire_uniform_projection, 1, GL_FALSE, projection_matrix_flat_array);
+    glUniform3f(a3_wire_uniform_object_colour, 1.0f, 0.5f, 0.0f); /* orange nose */
+    physics_world *world = physics_world_get_primary();
+    if (!world || !world->bodies) {
+        return;
+    }
+    for (int i = 0; i < gui_robot_get_count(); i++) {
+        ftc_robot *rb = gui_robot_get(i);
+        if (!rb) {
+            continue;
+        }
+        int ci = rb->chassis_body;
+        if ((ci < 0) || (ci >= world->body_count)) {
+            continue;
+        }
+        rigidbody *ch = &world->bodies[ci];
+        if (ch->type != object_cube) {
+            continue;
+        }
+        /* Nose cube: just proud of the +Z (front) face, riding chassis yaw. */
+        vector3 fwd =
+            vector4_rotate_to_vector3(ch->orientation, (vector3){0.0f, 0.0f, 1.0f});
+        vector3 nose_pos = vector3_addition(
+            ch->position, vector3_scaling(fwd, ch->half_extensions.z + 0.05f));
+        math4 model_matrix = math4_multiplication(
+            math4_translation(nose_pos),
+            math4_multiplication(vector4_to_math4(ch->orientation),
+                                 math4_scaling((vector3){0.05f, 0.05f, 0.05f})));
+        float model_matrix_flat_array[16];
+        math4_to_flat_array(model_matrix, model_matrix_flat_array);
+        glUniformMatrix4fv(a3_wire_uniform_model, 1, GL_FALSE, model_matrix_flat_array);
+        glBindVertexArray(cube_mesh.vertex_array_object);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, cube_mesh.wireframe_element_buffer_object);
+        glDrawElements(GL_LINES, cube_mesh.wireframe_index_count, GL_UNSIGNED_INT, 0);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, cube_mesh.element_buffer_object);
+    }
+    glBindVertexArray(0);
+}
