@@ -1264,9 +1264,20 @@ void collision_prepare_solver(struct physics_world *world, collision_data *sourc
                 if (axle_proj_len > 0.0001f) {
                     axle_proj = vector3_scaling(axle_proj, 1.0f / axle_proj_len);
                     /* Roller direction at roller_angle from wheel forward, in floor plane.
-                     * Grip direction = perpendicular to roller (friction tangent). */
-                    float cos_a = cosf(mw->roller_angle_rad);
-                    float sin_a = sinf(mw->roller_angle_rad);
+                     * Grip direction = perpendicular to roller (friction tangent).
+                     * TRUTH-MESH: exact cos/sin for the shipped ±45° rollers
+                     * instead of per-tick libm (cosf/sinf vary ~1e-7 across
+                     * libm builds and would desync cross-platform determinism
+                     * on every mecanum contact; exotic angles keep libm and
+                     * accept the footnote). */
+                    float cos_a, sin_a;
+                    if (fabsf(fabsf(mw->roller_angle_rad) - 0.78539816339f) < 1e-6f) {
+                        cos_a = 0.70710678118f;
+                        sin_a = (mw->roller_angle_rad > 0.0f) ? 0.70710678118f : -0.70710678118f;
+                    } else {
+                        cos_a = cosf(mw->roller_angle_rad);
+                        sin_a = sinf(mw->roller_angle_rad);
+                    }
                     vector3 perp = vector3_cross(floor_normal, axle_proj);
                     vector3 roller_free = vector3_addition(
                         vector3_scaling(axle_proj, cos_a),
