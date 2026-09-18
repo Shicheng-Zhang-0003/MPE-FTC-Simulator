@@ -2,7 +2,15 @@
 CC = gcc
 ENABLE_NATIVE ?= 0
 NATIVE_FLAG := $(if $(filter 1,$(ENABLE_NATIVE)),-march=native,)
-BASE_CFLAGS = $(shell pkg-config --cflags gtk+-3.0 epoxy) -I. $(NATIVE_FLAG) -Wall -Wextra -MMD -MP -ffp-contract=off
+BASE_CFLAGS = $(shell pkg-config --cflags gtk+-3.0 epoxy) -I. $(NATIVE_FLAG) -Wall -Wextra -ffp-contract=off
+# WIN_PORT: dependency files must list project headers only. -MMD embeds
+# absolute system paths (C:/msys64/...) which contain colons and fatally break
+# make ("multiple target patterns") on the next run, and bare -MM implies -E
+# (preprocess-only: objects would come out as dependency text!). So: compile
+# plain, then generate deps in a second pass. Note the pass uses -isystem
+# (not -I) for third-party paths: -MM only excludes *system* headers, and
+# pkg-config -I paths count as user headers without the rewrite below.
+SYS_CFLAGS = $(subst -I,-isystem,$(shell pkg-config --cflags gtk+-3.0 epoxy))
 BASE_LIBS = $(shell pkg-config --libs gtk+-3.0 epoxy) -lm
 # WIN_PORT: XInput for gamepad on Windows.
 ifeq ($(OS),Windows_NT)
@@ -44,6 +52,7 @@ help:
 $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
+	@$(CC) -MM -MP -MT $@ -MF $(@:.o=.d) $(SYS_CFLAGS) -I. $<
 
 clean:
 	rm -rf build build-debug build-release engine test_* mpe-tui
@@ -55,9 +64,13 @@ clean:
 # plus springs; never calls GTK/GL at runtime (spring GL render is linked
 # for its physics symbols but never invoked — output is terminal only).
 TUI_SRCS := tui/tui_main.c tui/tui_debugger.c tui/tui_dump.c
-TUI_CORE = $(MPE_TEST_CORE) $(SPRING_TEST_SRCS)
-TUI_LIBS := -lm $(shell pkg-config --libs ncurses) $(shell pkg-config --libs epoxy)
+TUI_FTC_CORE := robotics/motor.c robotics/motor_presets.c robotics/battery.c robotics/robot.c robotics/drivetrain.c
+TUI_CORE = $(MPE_TEST_CORE) $(SPRING_TEST_SRCS) $(TUI_FTC_CORE)
+# WIN_PORT: look ncurses up lazily (=, not :=) so `make clean`, `make engine`
+# and the headless tests never require it. Only the mpe-tui target does.
+TUI_LIBS = -lm $(shell pkg-config --libs ncursesw 2>/dev/null || pkg-config --libs ncurses 2>/dev/null) $(shell pkg-config --libs epoxy 2>/dev/null)
 build_tui: $(TUI_SRCS) $(TUI_CORE)
+	@if ! pkg-config --exists ncursesw ncurses 2>/dev/null; then echo "error: mpe-tui needs ncurses:"; echo "  MSYS2 MINGW64: pacman -S mingw-w64-x86_64-ncurses"; echo "  Debian/Ubuntu: sudo apt install libncurses-dev"; exit 1; fi
 	$(CC) $(CFLAGS) -Dmpe_tui_main $(TUI_SRCS) $(TUI_CORE) $(TUI_LIBS) -o mpe-tui
 mpe-tui: build_tui
 tui-smoke: build_tui
@@ -253,6 +266,10 @@ build_ftc_registry: tests/ftc_registry_test.c $(FTC_TEST_CORE) robotics/gui_robo
 	$(CC) $(CFLAGS) -Dmpe_ftc_registry_test tests/ftc_registry_test.c $(FTC_TEST_CORE) robotics/gui_robot_registry.c -lm -o test_ftc_registry
 test_ftc_registry: build_ftc_registry
 	./test_ftc_registry
+build_ftc_physics_validation: tests/ftc_physics_validation.c $(FTC_TEST_CORE)
+	$(CC) $(CFLAGS) -Dmpe_ftc_physics_validation_test tests/ftc_physics_validation.c $(FTC_TEST_CORE) -lm -o test_ftc_physics_validation
+test_ftc_physics_validation: build_ftc_physics_validation
+	./test_ftc_physics_validation
 
 .PHONY: clean build_two_world test_two_world build_revolute test_revolute \
 	build_cylinder_drop test_cylinder_drop build_driven_wheel test_driven_wheel \
@@ -271,4 +288,5 @@ test_ftc_registry: build_ftc_registry
 	build_frustum test_frustum \
 	build_ftc_teleop test_ftc_teleop build_ftc_mecanum test_ftc_mecanum \
 	build_ftc_tank_turn test_ftc_tank_turn build_ftc_odometry test_ftc_odometry \
-	build_ftc_stress test_ftc_stress build_ftc_registry test_ftc_registry
+	build_ftc_stress test_ftc_stress build_ftc_registry test_ftc_registry \
+	build_ftc_physics_validation test_ftc_physics_validation
