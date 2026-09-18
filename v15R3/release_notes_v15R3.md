@@ -1,7 +1,7 @@
 # MPE v15R3 Release Notes
 
 `v15R3` is the v15 configuration-system release: domain-driven `core` /
-`physics` / `render` / `scene` / `ui_input` modules, 78 runtime tunables with
+`physics` / `render` / `scene` / `ui_input` modules, 80 runtime tunables with
 schema clamp, warm-starting sequential-impulse solver (64 iterations,
 4-point Sutherland–Hodgman manifolds), full constraint framework (revolute,
 fixed, prismatic, distance, rope + spring joints), 3D spatial-hash
@@ -19,9 +19,10 @@ bitwise over 600 ticks (fixed 1/60 s step, fixed solver order, `-O3
 - **Joint creation UI + persistence scope:** scene v200 persists bodies plus
   spring and revolute joints; fixed/prismatic/distance/rope live in the
   headless suite and TUI demo only.
-- **SIMD/multithreading:** solver is scalar single-threaded by design
+- **SIMD/multithreading:** solver stays scalar single-threaded by design
   (bit-determinism outranks single-digit-% CPU gains; `-march=native` is an
-  opt-in `ENABLE_NATIVE=1` build).
+  opt-in `ENABLE_NATIVE=1` build). Physics steps on a worker thread with UI
+  mutations serialized under a world mutex.
 - **Capacity caps, counted not silent:** 16384 bodies / 1024 joints / 65536
   broadphase pairs / 8192 manifolds. Node/pair/manifold exhaustion drops
   (never corrupts) and is surfaced in the validation report and TUI dumps.
@@ -32,7 +33,19 @@ bitwise over 600 ticks (fixed 1/60 s step, fixed solver order, `-O3
   fires) — accepted for F10 long-run calm.
 - **Float32 world:** playable volume ±250 m (~0.03 mm resolution at the
   corners, 300× below contact slop). No origin rebasing inside the box.
-- **FTC layer:** odometry is encoder FK (`v=ω·r`, no-slip assumption) —
-  full-power foam driving slips, so odometry leads ground truth under
-  sustained full stick. Battery thermal is tracked but never derates output.
-  No suspension model (spawn clearances only).
+- **FTC layer:** ~6 kg competition plant (19.2:1, 96 mm wheels); odometry is
+  wheel-encoder translation with IMU-model heading (translation slips
+  honestly under wheelspin, heading tracks). Battery thermal is tracked
+  but never derates output. No suspension model (spawn clearances only).
+  Sticks are robot-relative with an orange nose marker; default camera
+  starts behind the robot.
+
+## Post-release development (past the tag, same freeze rules)
+
+- **All-truth drivetrain mesh:** anisotropic roller contact (rubber grip +
+  free roller axes) deleted the strafe/rotate chassis forces; traction at
+  1× Coulomb on the wheels; traction/odometry constants single-sourced;
+  SDK roller geometry verified by travel direction.
+- **Windows (MSYS2 MINGW64) supported:** warning-free builds, 36/36-capable
+  runner (`.exe` aware, retry on transient spawn blocks), MSVCRT-safe
+  formatting, ncursesw-tolerant TUI build.
