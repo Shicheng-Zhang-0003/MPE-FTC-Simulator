@@ -6,6 +6,24 @@
 #include "../core/math3d.h"
 #include "../config/mpe_config.h"
 
+/* FIX-STICK: robot-lateral unit (body +X in world, ground-flattened).
+ * The strafe cheat and roller scrub must ride the heading-relative lateral
+ * axis, not world +X: after any yaw, world-fixed lateral forces drive the
+ * robot's front/back instead of left/right. */
+static vector3 mecanum_lateral_axis(const rigidbody *chassis) {
+    vector3 lat = {1.0f, 0.0f, 0.0f};
+    if (chassis) {
+        lat = vector4_rotate_to_vector3(chassis->orientation, (vector3){1.0f, 0.0f, 0.0f});
+        lat.y = 0.0f;
+        if (vector3_length_squared(lat) < 1e-6f) {
+            lat = (vector3){1.0f, 0.0f, 0.0f};
+        } else {
+            lat = vector3_normalisation(lat);
+        }
+    }
+    return lat;
+}
+
 void drivetrain_tank (ftc_robot *robot, float left_power, float right_power) {
     if (!robot) {return;}
     if (left_power > 1.0f) {left_power = 1.0f;}
@@ -245,6 +263,13 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
             float mu = g_cfg.solver.roller_friction_coeff;
             float roller_factor = 0.7071f; /* sin(45): roller resolution */
             float yaw_arm = sqrtf(half_lx * half_lx + half_lz * half_lz);
+            /* FIX-STICK: robot-lateral unit (body +X in world, flattened).
+             * The strafe cheat used to push world +X always: correct at
+             * spawn yaw, but after any rotation "strafe" drove the robot's
+             * front/back instead of left/right (forward traction follows
+             * the wheels, so only strafe broke). All lateral forces below
+             * ride this heading-relative axis. */
+            vector3 lat_axis = mecanum_lateral_axis(chassis);
             vector3 cheat = {0.0f, 0.0f, 0.0f};
             /* FIX-MESH: 2x break-free margin (was 1x: on the 6 kg plant the
              * 0.707-scaled cheat could never exceed the wheels' lateral
@@ -252,7 +277,8 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
              * hooking up; measured 0.45 m in the 2 s gate vs 1.63 before).
              * Same philosophy as the traction 2x cap: break decisively,
              * let the contact solver cap transmission. */
-            cheat.x = robot->mecanum_strafe_cmd * 2.0f * mu * gravity_mag * total_mass * roller_factor;
+            cheat = vector3_scaling(
+                lat_axis, robot->mecanum_strafe_cmd * 2.0f * mu * gravity_mag * total_mass * roller_factor);
             /* FIX-MESH: yaw 2x as well (was 1x: pivot static of four planted
              * wheels holds ~mu*M*g*arm, so 1x sat at the margin — 0.23 rad
              * in 2 s of truth while the wheels spun freely and the wheel-FK
@@ -307,8 +333,12 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
                  * (measured 1.4 m/s and climbing); with it, strafe cruise
                  * is a predictable force/damping equilibrium (~0.9 m/s,
                  * the honest 55-60% of forward cruise rollers deliver).
-                 * Zero effect driving straight (vx~0) or holding (v~0). */
-                chassis->force_accumulator.x -= v.x * 40.0f;
+                 * Heading-relative like the cheat (world-x only held at
+                 * spawn yaw). Zero effect driving straight or holding. */
+                vector3 lat_damp = mecanum_lateral_axis(chassis);
+                chassis->force_accumulator = vector3_subtraction(
+                    chassis->force_accumulator,
+                    vector3_scaling(lat_damp, vector3_dot(v, lat_damp) * 40.0f));
                 /* FIX-AUDIT: pitch/roll structural damping (frame + tire
                  * flex stand-in, viscous, yaw untouched). Drive traction
                  * below the COM plus stator reaction is a nose-up moment on
