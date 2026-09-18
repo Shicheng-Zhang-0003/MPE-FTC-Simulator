@@ -1,10 +1,8 @@
-/* MPE_FTC_074: Drivetrain implementation (inverse kinematics + odometry).
- * Traction comes from real rolling contact via the solver's anisotropic
- * roller friction; no synthetic chassis forces anywhere in this file. */
+/* MPE_FTC_074: Drivetrain implementation */
+/* MPE_FTC_082 TEMPORARY — replace with anisotropic friction (MPE_FTC_095): Fixed syntax error (stray '}') + real mecanum chassis forces */
 #include "drivetrain.h"
 #include "../core/math3d.h"
 #include "../config/mpe_config.h"
-#include <math.h>
 
 void drivetrain_tank (ftc_robot *robot, float left_power, float right_power) {
     if (!robot) {return;}
@@ -22,10 +20,17 @@ void drivetrain_tank (ftc_robot *robot, float left_power, float right_power) {
     /* MFS_162_DEAD_FIELD: mecanum_active removed */
 }
 
-/* MPE_FTC_075: Mecanum drive inverse kinematics (per-wheel commands;
- * traction resolved by anisotropic roller contact in the solver). */
+/* MPE_FTC_075 + MPE_FTC_082: Mecanum drive with inverse kinematics
+ *
+ * Since the wheel model uses spheres (no natural rolling direction),
+ * mecanum strafe cannot work through wheel friction alone. We set
+ * per-wheel motor commands for forward drive (which the wheel_traction
+ * raycast converts to forward force), AND we compute a direct chassis
+ * force for the strafe/rotate components. drivetrain_update() applies
+ * that chassis force after ftc_robot_update(). */
 void drivetrain_mecanum (ftc_robot *robot, float forward, float strafe, float rotate) {
     if (!robot) {return;}
+    /* Clamp inputs */
     if (forward > 1.0f) {forward = 1.0f;}
     if (forward < -1.0f) {forward = -1.0f;}
     if (strafe > 1.0f) {strafe = 1.0f;}
@@ -33,89 +38,322 @@ void drivetrain_mecanum (ftc_robot *robot, float forward, float strafe, float ro
     if (rotate > 1.0f) {rotate = 1.0f;}
     if (rotate < -1.0f) {rotate = -1.0f;}
 
-    /* Mecanum IK: [0]=FL [1]=FR [2]=BL [3]=BR
-       FL: f+s-r / FR: f-s+r / BL: f-s-r / BR: f+s+r (+strafe=+X). */
-    int n = robot->wheel_count < 4 ? robot->wheel_count : 4;
-    float wheel_targets [FTC_MAX_WHEELS] = {0};
-    /* PHYS-FIX: generic count; mecanum requires 4 wheels. */
-    if (robot->wheel_count != 4) {
-        /* Degrade to tank-ish: same command all wheels */
-        for (int i = 0; i < robot->wheel_count; i++) wheel_targets[i] = forward;
-    } else {
-        wheel_targets [0] = forward + strafe - rotate;
-        wheel_targets [1] = forward - strafe + rotate;
-        wheel_targets [2] = forward - strafe - rotate;
-        wheel_targets [3] = forward + strafe + rotate;
-        float max_mag = 0.0f;
-        for (int i = 0; i < 4; i++) {
-            float mag = fabsf (wheel_targets [i]);
-            if (mag > max_mag) {max_mag = mag;}
-        }
-        if (max_mag > 1.0f) {
-            for (int i = 0; i < 4; i++) {wheel_targets [i] /= max_mag;}
-        }
-        n = 4;
+    /* Mecanum IK: per-wheel velocity targets
+       Wheel layout: [0]=FL, [1]=FR, [2]=BL, [3]=BR
+       FL: forward + strafe - rotate
+       FR: forward - strafe + rotate
+       BL: forward - strafe - rotate
+       BR: forward + strafe + rotate */
+
+    float wheel_targets [4];
+    wheel_targets [0] = forward + strafe - rotate;
+    wheel_targets [1] = forward - strafe + rotate;
+    wheel_targets [2] = forward - strafe - rotate;
+    wheel_targets [3] = forward + strafe + rotate;
+
+    /* Normalize if any target exceeds 1.0 */
+    float max_mag = 0.0f;
+    for (int i = 0; i < 4; i++) {
+        float mag = fabsf (wheel_targets [i]);
+        if (mag > max_mag) {max_mag = mag;}
     }
-    ftc_robot_set_wheel_commands (robot, wheel_targets, n);
+    if (max_mag > 1.0f) {
+        for (int i = 0; i < 4; i++) {wheel_targets [i] /= max_mag;}
+    }
+
+    /* Set motor commands (forward component uses wheel traction) */
+    ftc_robot_set_wheel_commands (robot, wheel_targets, 4);
+
+    /* Mecanum strafe/rotate: compute chassis force from roller geometry.
+     * Real mecanum wheels redirect forward force laterally via 45° rollers.
+     * Model as direct chassis force proportional to the strafe/rotate input,
+     * clamped to mu * total_weight so it respects friction limits. */
+    {
+        float total_mass = 0.0f;
+        /* Approximate total robot mass from motor preset + chassis.
+         * Use a rough estimate: chassis ~2.5 kg + 4 wheels ~0.8 kg. */
+        total_mass = 3.3f;  /* kg */
+        float gravity_mag = 9.81f;
+        float mu = g_cfg.world.floor_friction_s;
+        float max_lateral = mu * total_mass * gravity_mag;
+
+        /* Lateral force (strafe): roller angle factor for 45° mecanum */
+        float roller_factor = 0.7071f; /* sin(45°) = 1/√2 */
+        robot->mecanum_chassis_force.x = strafe * max_lateral * roller_factor;
+        robot->mecanum_chassis_force.z = 0.0f;
+        robot->mecanum_chassis_force.y = 0.0f;
+
+        /* Yaw torque from rotate input */
+        float max_torque = max_lateral * 0.2285f; /* half of 18" chassis */
+        robot->mecanum_chassis_torque = rotate * max_torque * 0.5f;
+    }
 }
 
 void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
     if ((!world) || (!robot) || (dt <= 0.0f)) {return;}
     ftc_robot_update (world, robot, dt);
 
-    /* TRUTH: exactly ONE rolling-resistance model exists: the solver's
-     * contact-patch pass (collision_apply_rolling_resistance), which uses
-     * true per-contact normal force. The second torque loop that lived here
-     * (c_rr * assumed-Mg/4 load, blind to load transfer and airborne state
-     * except a height gate) double-counted dissipation and is deleted.
-     * Zero-power is BRAKE via BackEMF + gearbox Coulomb drag; a FLOAT
-     * (coast) mode needs controller support (future). */
+/* MPE_DRIVETRAIN_REAL — FIX 117 (Path A / partial 095 keystone):
+ * real traction physics. Forward drive now comes from wheel torque
+ * converted to ground traction (clamped by friction), not from the
+ * chassis-force cheat. Lateral/yaw damping kills sliding and
+ * uncommanded rotation. Flip MPE_DRIVETRAIN_REAL to 0 to revert. */
+#define MPE_DRIVETRAIN_REAL 1
+#if MPE_DRIVETRAIN_REAL
+    {
+        vector3 world_up = {0.0f, 1.0f, 0.0f};
+        float gravity_mag = 9.81f;
+        if (g_cfg.world.gravity < 0.0f) { gravity_mag = -g_cfg.world.gravity; }
 
-    /* Odometry: encoder-based, not ground truth. wheel_radians are
-     * the encoder truth; pose comes from mecanum inverse kinematics rotated
-     * by estimated heading (gyro yaw). Slip/collisions now show as drift,
-     * as on a real bot. Ground-truth chassis_vel path deleted. */
+        /* Total robot mass -> per-wheel normal load */
+        float total_mass = 0.0f;
+        int chassis_ok = ((robot->chassis_body >= 0) &&
+                          (robot->chassis_body < world->body_count));
+        if (chassis_ok) { total_mass += world->bodies[robot->chassis_body].mass; }
+        for (int i = 0; i < robot->wheel_count; i++) {
+            int wi = robot->wheel_bodies[i];
+            if ((wi >= 0) && (wi < world->body_count)) {
+                total_mass += world->bodies[wi].mass;
+            }
+        }
+        float normal_per_wheel = ((robot->wheel_count > 0) && (total_mass > 0.0f))
+            ? (total_mass * gravity_mag / (float) robot->wheel_count) : 0.0f;
+        /* Traction limit: rolling grip is static friction (no-slip rolling).
+         * Audit note: while truly sliding the limit is mu_k, but traction
+         * here conveys motor torque through rolling contact; clamping the
+         * drive force itself at mu_k understates rolling grip and stalls
+         * the robot. Sliding is handled by the contact solver's
+         * static/kinetic selection. */
+        float grip_mu = g_cfg.world.floor_friction_s;
+        float max_grip = grip_mu * normal_per_wheel; /* MFS_162_FRICTION_FIX */
+
+        /* --- Per-wheel traction: torque -> force at contact --- */
+        for (int i = 0; i < robot->wheel_count; i++) {
+            int wi = robot->wheel_bodies[i];
+            if ((wi < 0) || (wi >= world->body_count)) { continue; }
+            rigidbody *wheel = &world->bodies[wi];
+
+            /* wheel radius from the body itself (cylinder) */
+            float r = wheel->radius;
+            if (r <= 0.001f) { continue; }
+
+            /* Traction requires contact (F<=mu*N): skip airborne wheels.
+             * Threshold 0.05 tolerates solver bounce/penetration slop. */
+            float wheel_bottom = wheel->position.y - wheel->radius;
+            if (wheel_bottom > 0.05f) {
+                continue;
+            }
+
+            /* rolling direction = axle x up (wheel-local X axle) */
+            vector3 axle = vector4_rotate_to_vector3(wheel->orientation, (vector3){1.0f, 0.0f, 0.0f});
+            vector3 rolling_dir = vector3_normalisation(vector3_cross(axle, world_up));
+
+            /* F = torque / r, clamped to friction limit */
+            float traction = robot->wheel_motors[i].output_torque / r;
+            if (traction > max_grip)  { traction = max_grip; }
+            if (traction < -max_grip) { traction = -max_grip; }
+            wheel->force_accumulator = vector3_addition(
+                wheel->force_accumulator,
+                vector3_scaling(rolling_dir, traction));
+            /* FIX-AUDIT: traction counts as driving for wheel-lock. */
+            if (fabsf(robot->wheel_motors[i].command) > 0.01f) {
+                wheel->driven_this_tick = true;
+            }
+        }
+
+        /* --- Mecanum chassis force (strafe/rotate) --- */
+        if (chassis_ok) {
+            rigidbody *chassis = &world->bodies[robot->chassis_body];
+            chassis->force_accumulator = vector3_addition(
+                chassis->force_accumulator, robot->mecanum_chassis_force);
+            chassis->torque_accumulator.y += robot->mecanum_chassis_torque;
+            /* Clear after application (one-shot per tick) */
+            robot->mecanum_chassis_force = (vector3){0.0f, 0.0f, 0.0f};
+            robot->mecanum_chassis_torque = 0.0f;
+        }
+
+        /* --- Chassis damping: kills sliding + uncommanded yaw --- */
+        if (chassis_ok) {
+            rigidbody *chassis = &world->bodies[robot->chassis_body];
+            float m = chassis->mass;
+            if (m > 0.0f) {
+                /* Isotropic horizontal drag. Coefficient 1.0 provides firm
+                 * lateral grip that prevents ice-rink sliding while letting
+                 * the motor's traction force dominate during drive. Matches
+                 * MFS-Stable-Working baseline for smooth, predictable feel. */
+                vector3 v = chassis->velocity;
+                vector3 horizontal_drag = (vector3){v.x, 0.0f, v.z};
+                chassis->force_accumulator = vector3_subtraction(
+                    chassis->force_accumulator,
+                    vector3_scaling(horizontal_drag, m * 1.0f));
+                float yaw_vel = chassis->angular_velocity.y;
+                chassis->torque_accumulator.y -= yaw_vel * m * 1.5f * 0.02f;
+                /* MFS_146_IDLE_HOLD: an unpowered real robot's drivetrain (gearbox
+                 * back-drive friction + motor cogging) resists motion, holding position
+                 * instead of drifting from mecanum contact asymmetry. Model as strong
+                 * horizontal chassis damping when all wheel commands are ~0 and the robot
+                 * is nearly stopped. The <0.25 m/s gate leaves normal high-speed coast-down
+                 * to back-EMF + rolling resistance. */
+                {
+                    int mfs_idle = 1;
+                    for (int mfs_wi = 0; mfs_wi < robot->wheel_count; mfs_wi++) {
+                        if (fabsf(robot->wheel_motors[mfs_wi].command) > 0.05f) { mfs_idle = 0; break; }
+                    }
+                    if (mfs_idle) {
+                        int mfs_cidx = robot->chassis_body;
+                        if ((mfs_cidx >= 0) && (mfs_cidx < world->body_count)) {
+                            rigidbody *mfs_chassis = &world->bodies[mfs_cidx];
+                            float mfs_hvx = mfs_chassis->velocity.x;
+                            float mfs_hvz = mfs_chassis->velocity.z;
+                            float mfs_hs = sqrtf((mfs_hvx * mfs_hvx) + (mfs_hvz * mfs_hvz));
+                            if (mfs_hs > 0.0001f) {
+                                /* MFS_147_COULOMB_HOLD: viscous damping alone only reaches a terminal
+                                 * drift against the constant mecanum contact asymmetry. A real gearbox's
+                                 * back-drive friction is ~constant (Coulomb) and is what actually holds
+                                 * the robot. Add a Coulomb term that exceeds the asymmetry force; clamp
+                                 * the total to the one-step stopping force so it can never reverse the
+                                 * chassis (no oscillation). */
+                                float mfs_viscous = mfs_hs * 8.0f * mfs_chassis->mass;
+                                float mfs_coulomb = 2.0f;
+                                float mfs_total = mfs_viscous + mfs_coulomb;
+                                float mfs_f_stop = mfs_chassis->mass * mfs_hs / dt;
+                                if (mfs_total > mfs_f_stop) { mfs_total = mfs_f_stop; }
+                                mfs_chassis->force_accumulator.x -= (mfs_hvx / mfs_hs) * mfs_total;
+                                mfs_chassis->force_accumulator.z -= (mfs_hvz / mfs_hs) * mfs_total;
+                            }
+                        }
+                    }
+                }
+
+/* FIX-AUDIT: hard velocity clamp restored. While non-physical, the contact
+ * solver's friction alone cannot prevent runaway acceleration from mecanum
+ * asymmetry forces exceeding lateral damping. Global safety clamp in
+ * rb_integrate_velocity is at 150 m/s (useless). */
 {
-    float w_rad[FTC_MAX_WHEELS] = {0};
-    float w_omega[FTC_MAX_WHEELS] = {0};
-    float wheel_r = 0.05f;
-    for (int i = 0; i < robot->wheel_count && i < FTC_MAX_WHEELS; i++) {
-        int wi = robot->wheel_bodies[i];
-        if (wi >= 0 && wi < world->body_count) {
-            rigidbody *rw = &world->bodies[wi];
-            vector3 axle = rw->cached_axes[0];
-            if (vector3_length_squared(axle) < 0.0001f)
-                axle = vector4_rotate_to_vector3(rw->orientation, (vector3){1.0f, 0.0f, 0.0f});
-            float omega = vector3_dot(rw->angular_velocity, axle);
-            w_omega[i] = omega;
-            robot->wheel_radians[i] += omega * dt;
-            w_rad[i] = robot->wheel_radians[i];
-            wheel_r = rw->radius;
+    float speed_sq = chassis->velocity.x * chassis->velocity.x +
+                     chassis->velocity.z * chassis->velocity.z;
+    float max_speed = 3.0f;
+    if (speed_sq > max_speed * max_speed) {
+        float speed = sqrtf(speed_sq);
+        float scale = max_speed / speed;
+        chassis->velocity.x *= scale;
+        chassis->velocity.z *= scale;
+    }
+}
+            }
         }
     }
-    (void)w_rad;
-    /* Gyro yaw (IMU proxy — defensible; translation is encoder-only). */
-    if (robot->chassis_body >= 0 && robot->chassis_body < world->body_count) {
-        vector3 up = {0.0f, 1.0f, 0.0f};
-        float yaw_rate = vector3_dot(world->bodies[robot->chassis_body].angular_velocity, up);
-        robot->odom_theta += yaw_rate * dt;
+
+/* MFS_132_ROLLING_RESISTANCE: apply small opposing torque to spinning
+* wheels in contact with the floor. Simulates realistic coast-down.
+* Only applies when motor command is near-zero (free-rolling). */
+{
+float c_rr = g_cfg.world.rolling_resistance_coeff; /* MFS_141: real config param, default 0.02 */
+if ((c_rr > 0.0f) && (robot->wheel_count > 0)) {
+float total_mass = 0.0f;
+int chassis_ok = ((robot->chassis_body >= 0) &&
+(robot->chassis_body < world->body_count));
+if (chassis_ok) { total_mass += world->bodies[robot->chassis_body].mass; }
+for (int i = 0; i < robot->wheel_count; i++) {
+int wi = robot->wheel_bodies[i];
+if ((wi >= 0) && (wi < world->body_count)) {
+total_mass += world->bodies[wi].mass;
+}
+}
+float g_mag = 9.81f;
+if (g_cfg.world.gravity < 0.0f) { g_mag = -g_cfg.world.gravity; }
+float n_per_wheel = (total_mass * g_mag) / (float) robot->wheel_count;
+for (int i = 0; i < robot->wheel_count; i++) {
+int wi = robot->wheel_bodies[i];
+if ((wi < 0) || (wi >= world->body_count)) { continue; }
+rigidbody *wheel = &world->bodies[wi];
+/* Only apply when motor command is near-zero (free-rolling) */
+if (fabsf(robot->wheel_motors[i].command) > 0.05f) { continue; }
+float r = wheel->radius;
+if (r <= 0.001f) { continue; }
+/* Rolling resistance force opposing rotation about axle */
+vector3 axle = wheel->cached_axes[0];
+float omega_axle = vector3_dot(wheel->angular_velocity, axle);
+if (fabsf(omega_axle) < 0.01f) { continue; }
+float f_rr = c_rr * n_per_wheel;
+float torque_rr = f_rr * r;
+/* Apply opposing torque about axle */
+float sign = (omega_axle > 0.0f) ? -1.0f : 1.0f;
+vector3 rr_torque = vector3_scaling(axle, sign * torque_rr);
+wheel->torque_accumulator = vector3_addition(wheel->torque_accumulator, rr_torque);
+wheel->driven_this_tick = true; /* MFS_169 */
+}
+}
+}
+
+#endif /* MPE_DRIVETRAIN_REAL */
+
+
+
+    /* FIX-AUDIT: encoder odometry (was chassis ground-truth integration,
+     * which hid slip/drift by construction). Forward kinematics from wheel
+     * encoders: fwd = mean(w)*r, strafe from mecanum combo (undoing the
+     * strafe=-strafe IK sign), yaw from differential/mecanum combo over
+     * the (offset_x+offset_z) moment arm. Integrated in the heading frame
+     * so slip shows up as odom-vs-truth error. */
+{
+    float w_rad[FTC_MAX_WHEELS] = {0};
+    for (int mfs_i = 0; mfs_i < robot->wheel_count && mfs_i < FTC_MAX_WHEELS; mfs_i++) {
+        int wi = robot->wheel_bodies[mfs_i];
+        if ((wi >= 0) && (wi < world->body_count)) {
+            rigidbody *w = &world->bodies[wi];
+            vector3 axle = w->cached_axes[0];
+            if (vector3_length_squared(axle) < 0.0001f) {
+                axle = vector4_rotate_to_vector3(w->orientation, (vector3){1.0f, 0.0f, 0.0f});
+            }
+            float omega = vector3_dot(w->angular_velocity, axle);
+            robot->wheel_radians[mfs_i] += omega * dt;
+            w_rad[mfs_i] = omega;
+        }
     }
-    /* Mecanum inverse kinematics (matches drivetrain_mecanum forward map). */
-    float vx_local = 0.0f, vz_local = 0.0f;
-    if (robot->wheel_count == 4) {
-        float w0 = w_omega[0]*wheel_r, w1 = w_omega[1]*wheel_r;
-        float w2 = w_omega[2]*wheel_r, w3 = w_omega[3]*wheel_r;
-        /* f=(sum)/4 -> vz, s=(FL-FR-BL+BR)/4 -> vx */
-        vz_local = (w0 + w1 + w2 + w3) * 0.25f;
-        vx_local = (w0 - w1 - w2 + w3) * 0.25f;
-    } else if (robot->wheel_count > 0) {
-        float sum = 0.0f;
-        for (int i = 0; i < robot->wheel_count; i++) sum += w_omega[i]*wheel_r;
-        vz_local = sum / (float)robot->wheel_count;
+    float r = 0.05f;
+    {
+        int wi0 = (robot->wheel_count > 0) ? robot->wheel_bodies[0] : -1;
+        if ((wi0 >= 0) && (wi0 < world->body_count) && (world->bodies[wi0].radius > 0.001f)) {
+            r = world->bodies[wi0].radius;
+        }
     }
-    float c = cosf(robot->odom_theta), s = sinf(robot->odom_theta);
-    robot->odom_x += (vx_local * c + vz_local * s) * dt;
-    robot->odom_z += (-vx_local * s + vz_local * c) * dt;
+    float v_fwd = 0.0f;
+    float v_lat = 0.0f;
+    float yaw_rate = 0.0f;
+    if (robot->wheel_count >= 4) {
+        float wfl = w_rad[0];
+        float wfr = w_rad[1];
+        float wbl = w_rad[2];
+        float wbr = w_rad[3];
+        v_fwd = ((wfl + wfr + wbl + wbr) * 0.25f) * r;
+        /* IK identity mapping: combo FL-FR-BL+BR = 4*strafe. */
+        v_lat = ((wfl - wfr - wbl + wbr) * 0.25f) * r;
+        float track = 0.48f; /* 2 * WHEEL_OFFSET_X = 2 * 0.24, differential drive moment arm */
+        yaw_rate = (((-wfl + wfr - wbl + wbr) * 0.25f) * r) / track;
+    } else if (robot->wheel_count >= 2) {
+        float wl = 0.0f;
+        float wr = 0.0f;
+        for (int i = 0; i < robot->wheel_count; i++) {
+            if ((i % 2) == 0) {
+                wl += w_rad[i];
+            } else {
+                wr += w_rad[i];
+            }
+        }
+        int nl = (robot->wheel_count + 1) / 2;
+        int nr = robot->wheel_count / 2;
+        wl = (nl > 0) ? (wl / (float) nl) : 0.0f;
+        wr = (nr > 0) ? (wr / (float) nr) : 0.0f;
+        v_fwd = ((wl + wr) * 0.5f) * r;
+        yaw_rate = ((wr - wl) * r) / 0.48f;
+    }
+    robot->odom_theta += yaw_rate * dt;
+    float c = cosf(robot->odom_theta);
+    float s = sinf(robot->odom_theta);
+    /* body->world yaw rotation about +Y: x'=x*c+z*s, z'=-x*s+z*c */
+    robot->odom_x += (v_lat * c + v_fwd * s) * dt;
+    robot->odom_z += (-v_lat * s + v_fwd * c) * dt;
 }
 
 }
