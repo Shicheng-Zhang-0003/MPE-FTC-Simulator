@@ -22,6 +22,9 @@
 #include "physics/spring_joint.h"
 #include "config/mpe_config.h"
 #include "tui_debugger.h"
+#include "robotics/robot.h"
+#include "robotics/drivetrain.h"
+#include "robotics/motor_presets.h"
 
 /* Stubs for legacy-TU symbols referenced by spring_joint.o (render path
  * only; the TUI never calls GL rendering). Same set as the spring test. */
@@ -44,7 +47,7 @@ static void print_help(const char *prog) {
     printf("  --snapshot [N]       run N ticks (default 600) then dump full state\n");
     printf("  --stream N           dump state every --every ticks while running N ticks\n");
     printf("  --every K            stream interval (default 60)\n");
-    printf("  --scene NAME         demo|tower|pendulum|springlab|f10 (default demo)\n");
+    printf("  --scene NAME         demo|tower|pendulum|springlab|f10|ftc (default demo)\n");
     printf("  --ticks N            ticks to run in live mode before auto-exit (0 = run forever)\n");
     printf("  --help               this text\n");
     printf("\nLive keys: 1..5 screens, Tab cycle, j/k select, Space pause, s step,\n");
@@ -146,6 +149,37 @@ static void scene_springlab_only(physics_world *world) {    g_cfg.world.gravity 
     add_joint_by_ids(world, world->bodies[anchor].object_id, world->bodies[mass].object_id, 2.0f, 20.0f, 0.0f);
 }
 
+/* FTC mecanum robot scene: 4-mecanum chassis on foam tiles.
+ * Exercises the full FTC drivetrain pipeline: motor subcycling,
+ * traction clamping, anisotropic contact, revolute constraints,
+ * and wheel-lock. Built via `make test_ftc_mecanum`. */
+static void scene_ftc_only(physics_world *world) {
+    scene_floor(world);
+    constraint_pool_init(world);
+    joint_init_pool(world);
+    /* Create an FTC robot with mecanum drive. The robot spawns at
+     * rest height above the floor with 4 mecanum wheels. */
+    ftc_robot robot;
+    memset(&robot, 0, sizeof(ftc_robot));
+    ftc_robot_create(world, &robot, 0.0f, 0.0f, 0.0f, MOTOR_GB_5203_19_2);
+    /* Apply forward command to all wheels for a few seconds. */
+    float commands[4] = {0.5f, 0.5f, 0.5f, 0.5f};
+    ftc_robot_set_wheel_commands(&robot, commands, 4);
+    /* Run 300 ticks (5 seconds) to observe traction and settling. */
+    const float dt = 1.0f / 60.0f;
+    for (int i = 0; i < 300; i++) {
+        ftc_robot_update(world, &robot, dt);
+        physics_world_step(world, dt);
+    }
+    /* Zero commands to observe idle hold. */
+    memset(commands, 0, sizeof(commands));
+    ftc_robot_set_wheel_commands(&robot, commands, 4);
+    for (int i = 0; i < 120; i++) {
+        ftc_robot_update(world, &robot, dt);
+        physics_world_step(world, dt);
+    }
+}
+
 static void scene_demo(physics_world *world) {
     scene_floor(world);
     constraint_pool_init(world);
@@ -233,7 +267,11 @@ static int build_scene(physics_world *world, const char *name) {
         scene_f10_only(world);
         return 0;
     }
-    fprintf(stderr, "mpe-tui: unknown scene '%s' (demo|tower|pendulum|springlab|f10)\n", name);
+    if (strcmp(name, "ftc") == 0) {
+        scene_ftc_only(world);
+        return 0;
+    }
+    fprintf(stderr, "mpe-tui: unknown scene '%s' (demo|tower|pendulum|springlab|f10|ftc)\n", name);
     return -1;
 }
 
