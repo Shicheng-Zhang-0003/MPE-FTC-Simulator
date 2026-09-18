@@ -19,7 +19,7 @@ int main(void) {
 
     ftc_robot robot;
     int rc = ftc_robot_create_with_drive(&world, &robot, 0.0f, ftc_robot_rest_height(), 0.0f,
-                                         MOTOR_GB_5203_30, FTC_DRIVETRAIN_TANK);
+                                         MOTOR_GB_5203_19_2, FTC_DRIVETRAIN_TANK);
     if (rc != 0) { printf("[FAIL] could not create robot\n"); return 1; }
 
     float start_x, start_y, start_z;

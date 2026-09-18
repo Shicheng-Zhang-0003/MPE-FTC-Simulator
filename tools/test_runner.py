@@ -58,7 +58,35 @@ KNOWN_TESTS = [
     "ftc_odometry",
     "ftc_stress",
     "ftc_registry",
+    "ftc_physics_validation",
 ]
+
+# FTC Robotics Test Suite
+# ======================
+# FTC tests exercise the mecanum drivetrain physics pipeline:
+# - Motor subcycling (16x per tick for electrical stability)
+# - Traction clamping (torque -> force at contact, clamped by friction)
+# - Anisotropic contact (grip axis vs roller axis friction)
+# - Revolute constraints (hinge joints for wheel rotation)
+# - Wheel-lock (locks undriven wheels to axle axis)
+# - Chassis damping (horizontal drag, yaw damping, idle hold)
+# - Rolling resistance (Coulomb + viscous for coast-down)
+# - Encoder odometry (forward kinematics from wheel encoders)
+#
+# Key physics parameters:
+# - floor_friction_s: 0.8 (rubber on foam tiles)
+# - floor_friction_k: 0.6
+# - roller_friction_coeff: 0.8 (must match floor_friction_s for traction)
+# - wheel_lock_omega_thresh: 0.5 rad/s
+#
+# FTC test files:
+# - ftc_teleop: basic teleop control
+# - ftc_mecanum: mecanum drive kinematics
+# - ftc_tank_turn: tank turn validation
+# - ftc_odometry: encoder odometry validation
+# - ftc_stress: stress test with multiple robots
+# - ftc_registry: registry parameter validation
+# - ftc_physics_validation: full physics pipeline validation
 
 # Tests that encode desired future behavior but are currently expected
 # to fail because the corresponding model is not implemented yet.
