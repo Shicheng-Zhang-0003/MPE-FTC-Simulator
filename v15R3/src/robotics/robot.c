@@ -10,7 +10,14 @@
 #define CHASSIS_HALF_X 0.2285f  /* 18" / 2 = 9" = 0.2286m */
 #define CHASSIS_HALF_Y 0.040f   /* ~3" tall plate; realistic for 1/8" aluminium + belly pan */
 #define CHASSIS_HALF_Z 0.2285f  /* square chassis */
-#define CHASSIS_MASS 2.5f       /* ~5.5 lbs typical FTC robot (chassis + 4 motors + battery) */
+#define CHASSIS_MASS 5.2f       /* bare drivetrain + battery + hubs: total ~6.0 kg
+                                 * (~13 lb competition weight with 4x207 g wheels).
+                                 * FIX-MESH: was 2.5 kg (3.3 total) — too light to
+                                 * drive like a true FTC bot (twitchy, easily
+                                 * excited joints). Heavier plant + same torque =
+                                 * calmer launch, planted cruise, honest traction
+                                 * loads. All mass-derived sizing (traction cap,
+                                 * cheat, drag, idle hold) reads live mass. */
 #define WHEEL_RADIUS 0.048f     /* 96mm goBILDA mecanum (official SKU 3213-3606-0002) */
 #define WHEEL_MASS 0.207f       /* 207g per official goBILDA spec */
 #define WHEEL_HALF_WIDTH 0.02f  /* 40mm wide (20mm half-width) */

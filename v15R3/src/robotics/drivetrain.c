@@ -233,6 +233,11 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
          * COM acceleration is F/M_total regardless of which body carries
          * it, since joint forces are internal); yaw arm is hypot(lx,lz),
          * the true contact moment arm. */
+        /* TEMP-EXP-A result (kept for the record): with the cheat disabled,
+         * pure-contact strafe measured 0.0004 m in 2 s on this plant
+         * (grippy 1.0 contact holds the chassis while wheels spin), vs
+         * 1.63 m with it. The single-tangent contact model cannot resolve
+         * roller lateral thrust, so the chassis path stays. */
         if (chassis_ok) {
             rigidbody *chassis = &world->bodies[robot->chassis_body];
             /* FIX-AUDIT: grip sizes from the roller knob (wired, was a dead
@@ -241,8 +246,18 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
             float roller_factor = 0.7071f; /* sin(45): roller resolution */
             float yaw_arm = sqrtf(half_lx * half_lx + half_lz * half_lz);
             vector3 cheat = {0.0f, 0.0f, 0.0f};
-            cheat.x = robot->mecanum_strafe_cmd * mu * gravity_mag * total_mass * roller_factor;
-            float cheat_torque = robot->mecanum_rotate_cmd * mu * gravity_mag * total_mass * yaw_arm;
+            /* FIX-MESH: 2x break-free margin (was 1x: on the 6 kg plant the
+             * 0.707-scaled cheat could never exceed the wheels' lateral
+             * static hold, so strafe sat in stick-slip creep for ~3 s before
+             * hooking up; measured 0.45 m in the 2 s gate vs 1.63 before).
+             * Same philosophy as the traction 2x cap: break decisively,
+             * let the contact solver cap transmission. */
+            cheat.x = robot->mecanum_strafe_cmd * 2.0f * mu * gravity_mag * total_mass * roller_factor;
+            /* FIX-MESH: yaw 2x as well (was 1x: pivot static of four planted
+             * wheels holds ~mu*M*g*arm, so 1x sat at the margin — 0.23 rad
+             * in 2 s of truth while the wheels spun freely and the wheel-FK
+             * odometry fictitiously reported 8 rad). */
+            float cheat_torque = robot->mecanum_rotate_cmd * 2.0f * mu * gravity_mag * total_mass * yaw_arm;
             chassis->force_accumulator = vector3_addition(chassis->force_accumulator, cheat);
             chassis->torque_accumulator.y += cheat_torque;
             /* One-shot per tick (fields also carry the legacy precomputed
@@ -275,6 +290,25 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
                 float yaw_vel = chassis->angular_velocity.y;
                 /* FIX-AUDIT: dt-based (was a hardcoded 0.02 frame factor). */
                 chassis->torque_accumulator.y -= yaw_vel * m * 1.5f * dt;
+                /* FIX-MESH: yaw pivot-scrub damping. Pivoting four planted
+                 * tires scrubs hard (the dissipation the contact model
+                 * cannot resolve — same gap as lateral scrub). Without it
+                 * the 2x break-free cheat equilibrates wherever vague
+                 * kinetic friction says (measured 30 rad/s fidget spin);
+                 * with it, full-stick turn rate is a predictable
+                 * torque/damping equilibrium (~2.5 rad/s, tank parity).
+                 * Zero effect driving straight (yaw~0). */
+                chassis->torque_accumulator.y -= yaw_vel * 12.0f;
+                /* FIX-MESH: lateral roller-scrub damping. Mecanum rollers
+                 * scrub heavily in lateral motion (the dissipation the
+                 * single-tangent contact model cannot resolve — same gap
+                 * the strafe cheat fills). Without it the 2x break-free
+                 * cheat equilibrates wherever vague contact friction says
+                 * (measured 1.4 m/s and climbing); with it, strafe cruise
+                 * is a predictable force/damping equilibrium (~0.9 m/s,
+                 * the honest 55-60% of forward cruise rollers deliver).
+                 * Zero effect driving straight (vx~0) or holding (v~0). */
+                chassis->force_accumulator.x -= v.x * 40.0f;
                 /* FIX-AUDIT: pitch/roll structural damping (frame + tire
                  * flex stand-in, viscous, yaw untouched). Drive traction
                  * below the COM plus stator reaction is a nose-up moment on
@@ -388,12 +422,21 @@ wheel->driven_this_tick = true; /* MFS_169 */
 
 
     /* FIX-AUDIT: encoder odometry (was chassis ground-truth integration,
-     * which hid slip/drift by construction). Forward kinematics from wheel
-     * encoders: fwd = mean(w)*r, strafe from the mecanum combo, yaw from
-     * the wheel-velocity pattern over the live moment arm (track for
-     * differential, lx+lz for mecanum). Integrated in the heading frame
-     * so slip shows up as odom-vs-truth error. Sign convention: rotate+
-     * is CCW (+theta), matching the tank path and the IK above. */
+     * which hid slip/drift by construction). Translation (fwd/lat) comes
+     * from wheel-encoder forward kinematics so slip shows up as
+     * odom-vs-truth error. Sign convention: CCW-positive, matching the
+     * tank path and the IK above.
+     * FIX-MESH: heading comes from the chassis yaw rate — the IMU channel
+     * of the real FTC sensor suite (IMU heading + wheel-encoder
+     * translation). Wheel-FK yaw was used before and is fiction whenever
+     * yaw arrives via the chassis path: the rotate wheels spin freely
+     * while the chassis yaws slowly, so FK reported 8 rad for 0.23 rad of
+     * truth. Encoders keep telling the truth about translation; the IMU
+     * tells the truth about heading. */
+    float chassis_yaw_rate = 0.0f;
+    if ((robot->chassis_body >= 0) && (robot->chassis_body < world->body_count)) {
+        chassis_yaw_rate = world->bodies[robot->chassis_body].angular_velocity.y;
+    }
 {
     float w_rad[FTC_MAX_WHEELS] = {0};
     for (int mfs_i = 0; mfs_i < robot->wheel_count && mfs_i < FTC_MAX_WHEELS; mfs_i++) {
@@ -409,9 +452,9 @@ wheel->driven_this_tick = true; /* MFS_169 */
             w_rad[mfs_i] = omega;
         }
     }
-    /* FIX-AUDIT: live wheel radius (was a 0.05 literal vs the 0.048 plant)
-     * and live geometry (was a 0.48 "2*0.24" literal vs the 0.517 plant,
-     * and the mecanum yaw wrongly used track width instead of lx+lz). */
+    /* FIX-AUDIT: live wheel radius (was a 0.05 literal vs the 0.048 plant).
+     * Geometry moments (track, lx+lz) live at function scope for the
+     * traction/cheat sizing above; heading needs none (IMU channel). */
     float r = FTC_WHEEL_RADIUS_M;
     {
         int wi0 = (robot->wheel_count > 0) ? robot->wheel_bodies[0] : -1;
@@ -419,17 +462,8 @@ wheel->driven_this_tick = true; /* MFS_169 */
             r = world->bodies[wi0].radius;
         }
     }
-    float track = 2.0f * half_lx;
-    float mxy_arm = half_lx + half_lz;
-    if (!(track > 0.1f) || !isfinite(track)) {
-        track = FTC_TRACK_WIDTH_M;
-    }
-    if (!(mxy_arm > 0.1f) || !isfinite(mxy_arm)) {
-        mxy_arm = FTC_MECANUM_ARM_M;
-    }
     float v_fwd = 0.0f;
     float v_lat = 0.0f;
-    float yaw_rate = 0.0f;
     if (robot->wheel_count >= 4) {
         float wfl = w_rad[0];
         float wfr = w_rad[1];
@@ -438,9 +472,6 @@ wheel->driven_this_tick = true; /* MFS_169 */
         v_fwd = ((wfl + wfr + wbl + wbr) * 0.25f) * r;
         /* IK identity mapping: combo FL-FR-BL+BR = 4*strafe. */
         v_lat = ((wfl - wfr - wbl + wbr) * 0.25f) * r;
-        /* FIX-AUDIT: CCW-positive (was negated, disagreeing with the tank
-         * path and the corrected IK above). */
-        yaw_rate = (((wfl - wfr + wbl - wbr) * 0.25f) * r) / mxy_arm;
     } else if (robot->wheel_count >= 2) {
         float wl = 0.0f;
         float wr = 0.0f;
@@ -456,11 +487,8 @@ wheel->driven_this_tick = true; /* MFS_169 */
         wl = (nl > 0) ? (wl / (float) nl) : 0.0f;
         wr = (nr > 0) ? (wr / (float) nr) : 0.0f;
         v_fwd = ((wl + wr) * 0.5f) * r;
-        /* FIX-AUDIT: CCW-positive (wl-wr), live track (was (wr-wl)/0.48:
-         * negated AND 7% off). Matches the 4-wheel branch and tank physics. */
-        yaw_rate = ((wl - wr) * r) / track;
     }
-    robot->odom_theta += yaw_rate * dt;
+    robot->odom_theta += chassis_yaw_rate * dt;
     float c = cosf(robot->odom_theta);
     float s = sinf(robot->odom_theta);
     /* body->world yaw rotation about +Y: x'=x*c+z*s, z'=-x*s+z*c */

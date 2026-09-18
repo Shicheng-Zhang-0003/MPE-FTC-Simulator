@@ -118,8 +118,13 @@ int main(void) {
         drivetrain_update(&world, &robot, DT);
         physics_world_step(&world, DT);
 
-        /* smoothness sample during the steady part of the short drive */
-        if ((sec >= 5.3f) && (sec < 5.7f)) {
+        /* smoothness sample during phase-1 steady cruise (0.6-1.0 s of
+         * uninterrupted full stick; launch transient done by 0.5 s on this
+         * plant). FIX-MESH: was sampled 5.3-5.7 s in the 0.6 s short-drive
+         * phase — still accelerating there, so the gate compared
+         * peak-accel against mean-accel instead of measuring cruise ripple
+         * (a brisk launch alone could trip the 4x ratio). */
+        if ((sec >= 0.6f) && (sec < 1.0f)) {
             float v = vector3_length(world.bodies[robot.chassis_body].velocity);
             if (smooth_n > 0) {
                 float dv = fabsf(v - v_last);
