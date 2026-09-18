@@ -129,18 +129,17 @@ ftc_robot_invalidate(robot);
 return 1;
         }
 
-/* MFS_MECANUM_REAL: Mark wheel as mecanum with roller angle.
-          * Standard FTC mecanum (axle along X, robot forward = +Z):
-          *   FL (-X,+Z): roller at +45° from forward (+Z) = +45° from axle (+X)
-          *   FR (+X,+Z): roller at -45° from forward = -45° from axle
-          *   BL (-X,-Z): roller at -45° from forward = -45° from axle
-          *   BR (+X,-Z): roller at +45° from forward = +45° from axle
-          * Matches drivetrain_mecanum IK: positive strafe = +X world. */
+        /* MFS_MECANUM_REAL: roller angles set to the SDK-standard X.
+         * TRUTH-MESH: verified by direction of travel. The previous signs
+         * (FL/BR +45) form the MIRROR X: with SDK-standard IK they strafed
+         * -X for +strafe (measured 0.51 m backwards; the old tree hid this
+         * with a strafe=-strafe input flip). FL/BR -45, FR/BL +45 matches
+         * the SDK wheel convention: +strafe drives +X (robot-left). */
          float roller_angle = 0.0f;
-         if (i == 0) roller_angle = 0.78539816339f;      /* front-left: +45° from forward */
-         if (i == 1) roller_angle = -0.78539816339f;       /* front-right: -45° from forward */
-         if (i == 2) roller_angle = -0.78539816339f;       /* back-left: -45° from forward */
-         if (i == 3) roller_angle = 0.78539816339f;      /* back-right: +45° from forward */
+         if (i == 0) roller_angle = -0.78539816339f;      /* front-left */
+         if (i == 1) roller_angle = 0.78539816339f;       /* front-right */
+         if (i == 2) roller_angle = 0.78539816339f;       /* back-left */
+         if (i == 3) roller_angle = -0.78539816339f;      /* back-right */
         
         if (robot->drivetrain_type == FTC_DRIVETRAIN_MECANUM) {
                 rigidbody_set_mecanum(&world->bodies[robot->wheel_bodies[i]], true, roller_angle);
