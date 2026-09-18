@@ -109,9 +109,12 @@ void islands_build(struct physics_world *world, broadphase_pair *pairs, int pair
             island_union(world, a, b);
         }
     }
-    /* Joints join islands. TRUTH: O(J*B) linear scan per tick stalled with
-     * many joints/bodies. Use pointer-offset fast path (bodies from same
-     * world are contiguous) with id fallback, no nested scan. */
+    /* Joints join islands. FIX-AUDIT: this is an O(J*B) id scan per tick
+     * (a prior comment claimed a "pointer-offset fast path, no nested
+     * scan", but the code below is the nested scan). Honest cost at caps:
+     * 1024*16384 id compares/tick worst-case; typical scenes (a handful of
+     * joints) pay almost nothing since the inner loop breaks early once
+     * both endpoints are found. A hash map would help only giant rigs. */
     {
         uint32_t ids_a[mpe_max_joints];
         uint32_t ids_b[mpe_max_joints];

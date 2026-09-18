@@ -1229,9 +1229,19 @@ void collision_prepare_solver(struct physics_world *world, collision_data *sourc
             else if (m->object_b && m->object_b->is_mecanum) mw = m->object_b;
             bool is_floor = false;
             if (m->object_b && m->object_b->object_id == 0xFFFFFFFFu) is_floor = true;
+            /* FIX-AUDIT: symmetric mecanum-side check. The old fallback only
+             * tested object_a as the mecanum body, so a mecanum wheel in the
+             * object_b slot against a static-box floor (slab floors, wall
+             * boxes) missed the grip-axis redirect. Either side now qualifies
+             * provided the mecanum body is above the static support. */
             else if (m->object_b && m->object_b->static_state && fabsf(m->normal_vector.y) > 0.95f) {
-                if (m->object_a && m->object_a->is_mecanum && m->object_a->position.y > m->object_b->position.y)
+                rigidbody *mw_side = (m->object_a && m->object_a->is_mecanum) ? m->object_a : NULL;
+                rigidbody *ob_side = (m->object_b && m->object_b->is_mecanum) ? m->object_b : NULL;
+                rigidbody *support = (mw_side == m->object_a) ? m->object_b : m->object_a;
+                rigidbody *wheel = mw_side ? mw_side : ob_side;
+                if (wheel && support && wheel->position.y > support->position.y) {
                     is_floor = true;
+                }
             }
             if (mw && mw->type == object_cylinder && is_floor) {
                 vector3 axle_world = mw->cached_axes[0];
