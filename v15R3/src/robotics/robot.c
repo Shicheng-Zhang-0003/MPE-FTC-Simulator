@@ -84,7 +84,6 @@ return 1;
     robot->wheel_count = 4;
 
     int chassis_body_snapshot = robot->chassis_body;
-    int wheel_count_snapshot = 0;
     for (int i = 0; i < 4; i++) {
         /* Create wheel as cylinder (axle along X) */
         int added = physics_world_add_cylinder(world, WHEEL_RADIUS, WHEEL_HALF_WIDTH, WHEEL_MASS,
@@ -101,7 +100,6 @@ ftc_robot_invalidate(robot);
 return 1;
         }
         robot->wheel_bodies[i] = added;
-        wheel_count_snapshot++;
 
         uint32_t wheel_id = world->bodies[robot->wheel_bodies[i]].object_id;
 
