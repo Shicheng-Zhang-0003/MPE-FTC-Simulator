@@ -35,6 +35,12 @@ typedef struct {
     int32_t hash_next;
 } cached_contact;
 
+/* FIX-AUDIT: per-world constraint id->index cache (was file-static globals
+ * in constraint.c, shared by all worlds/threads: twin worlds with equal
+ * count+first-id reused each other's entries, and concurrent steps raced).
+ * Rebuilt once per tick in constraint_pre_step_all; solve reuses. */
+#define CONSTRAINT_ID_CACHE_SIZE 2048
+
 typedef struct physics_world {
     rigidbody *bodies;
     int body_count;
@@ -95,6 +101,14 @@ typedef struct physics_world {
      * prev array — floor contacts blind it. It probes the warm-start cache
      * per id-pair instead; see contact_cache_has_pair.) */
     unsigned char *has_contact;
+    /* Constraint id->index cache (see note above). Heap-zeroed with the
+     * world; ready=false until the first rebuild. */
+    uint32_t constraint_id_keys[CONSTRAINT_ID_CACHE_SIZE];
+    int constraint_id_vals[CONSTRAINT_ID_CACHE_SIZE];
+    unsigned char constraint_id_valid[CONSTRAINT_ID_CACHE_SIZE];
+    int constraint_id_body_count;
+    uint32_t constraint_id_first_id;
+    bool constraint_id_ready;
 } physics_world;
 
 void physics_world_init(physics_world *world);

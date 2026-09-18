@@ -701,6 +701,11 @@ void rb_integrate_position(rigidbody *rigid_body, float delta_time) {
                                   (float) (rigid_body->angular_velocity.y * inv * s),
                                   (float) (rigid_body->angular_velocity.z * inv * s)};
         } else {
+            /* FIX-AUDIT: counted libm fallback (|w|*dt >= 1 rad, >=60 rad/s
+             * at 60 Hz). vector4_from_axis_with_angle uses sinf/cosf, which
+             * are platform-varying: count both so desync stays diagnosable
+             * per the det_math.h contract (previously silent). */
+            det_fallback_trig_count += 2;
             spin_rotor = vector4_from_axis_with_angle(
                 vector3_scaling(rigid_body->angular_velocity, 1.0f / spin_rate), spin_rate * delta_time);
         }
