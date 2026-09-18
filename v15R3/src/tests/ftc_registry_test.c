@@ -20,7 +20,7 @@ int main(void) {
     constraint_pool_init(world);
 
     int first_count = world->body_count;
-    int idx0 = gui_robot_spawn(0.0f, ftc_robot_rest_height(), 0.0f, MOTOR_GB_5203_30);
+    int idx0 = gui_robot_spawn(0.0f, ftc_robot_rest_height(), 0.0f, MOTOR_GB_5203_19_2);
     if (idx0 != 0) {
         printf("[FAIL] first gui_robot_spawn returned %d (want 0)\n", idx0);
         return 1;
@@ -38,7 +38,7 @@ int main(void) {
     /* Second spawn must reuse the existing field (no duplicate walls).
      * Offset laterally: identical spawn points would interpenetrate. */
     int bodies_before_second = world->body_count;
-    int idx1 = gui_robot_spawn(1.0f, ftc_robot_rest_height(), 0.0f, MOTOR_GB_5203_30);
+    int idx1 = gui_robot_spawn(1.0f, ftc_robot_rest_height(), 0.0f, MOTOR_GB_5203_19_2);
     if (idx1 != 1) {
         printf("[FAIL] second gui_robot_spawn returned %d (want 1)\n", idx1);
         return 1;

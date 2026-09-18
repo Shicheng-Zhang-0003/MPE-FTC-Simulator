@@ -19,7 +19,7 @@ int main(void) {
     ftc_ensure_field_walls(&world);
 
     ftc_robot robot;
-    int rc = ftc_robot_create(&world, &robot, 0.0f, ftc_robot_rest_height(), 0.0f, MOTOR_GB_5203_30);
+    int rc = ftc_robot_create(&world, &robot, 0.0f, ftc_robot_rest_height(), 0.0f, MOTOR_GB_5203_19_2);
     if (rc != 0) { printf("[FAIL] could not create robot\n"); return 1; }
 
     const float dt = 1.0f / 60.0f;
