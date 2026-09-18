@@ -23,6 +23,10 @@ void gui_robot_tick(float dt);
 /* Apply keyboard drive input to all registered robots. */
 void gui_robot_apply_drive(float forward, float strafe, float rotate);
 
+/* Same with explicit frame dt for the stick smoother (dt<=0 means 1/60).
+ * Prefer this on the real frame clock; the 3-arg form is fixed-step. */
+void gui_robot_apply_drive_dt(float forward, float strafe, float rotate, float dt);
+
 /* Query */
 int gui_robot_get_count(void);
 ftc_robot *gui_robot_get(int index);

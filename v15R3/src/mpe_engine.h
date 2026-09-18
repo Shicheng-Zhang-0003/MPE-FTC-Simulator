@@ -97,6 +97,12 @@ void physics_thread_start(void);
 void physics_thread_stop(void);
 bool physics_thread_is_running(void);
 void physics_thread_wake(void);  /* Signal physics thread to process one tick */
+/* FIX-AUDIT: world lock for UI-thread world mutations (spawn/remove/terminal
+ * edits) that must serialize against the physics worker's step. Short,
+ * non-reentrant critical sections only — never hold across GTK calls that
+ * run a nested main loop. */
+void world_lock(void);
+void world_unlock(void);
 
 /* ------------------------------------------------------------------ */
 /* Optional GTK application activation entry point                    */

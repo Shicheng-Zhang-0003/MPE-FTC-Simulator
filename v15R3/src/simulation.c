@@ -33,6 +33,16 @@
 static GThread *physics_thread = NULL;
 static GMutex physics_mutex;
 static GCond physics_cond;
+/* FIX-AUDIT: world mutex. The physics worker steps bodies[] while the GTK
+ * callback used to write accumulators (gui_robot_tick) and read bodies
+ * (sleeping-count scan, validation, overlay) on the UI thread with no
+ * lock — torn reads and heap races under F11/torture. physics_mutex only
+ * guarded the wake flag. world_mutex serializes: worker holds it across
+ * physics_world_step; the UI callback holds it across gui_robot_tick +
+ * signal + post-step reads. Short critical sections only (no GTK calls
+ * that re-enter the main loop inside). */
+static GMutex world_mutex;
+static bool world_mutex_ready = false;
 static _Atomic bool physics_thread_running = false;
 static _Atomic bool physics_thread_should_stop = false;
 static _Atomic int physics_tick_requested = 0;
@@ -85,10 +95,12 @@ static gpointer physics_thread_func(gpointer user_data) {
         if (tick_now || physics_thread_should_stop) {
             if (physics_thread_should_stop) break;
 
-            /* Run one fixed physics tick */
+            /* Run one fixed physics tick (serialized vs the UI thread). */
             physics_world *world = physics_world_get_primary();
             if (world && world->bodies && world->body_count > 0) {
+                g_mutex_lock(&world_mutex);
                 physics_world_step(world, fixed_physics_dt);
+                g_mutex_unlock(&world_mutex);
             }
 
             /* Schedule next wakeup: fixed_physics_dt from NOW (not from last wakeup)
@@ -113,6 +125,10 @@ void physics_thread_start(void) {
 
     g_mutex_init(&physics_mutex);
     g_cond_init(&physics_cond);
+    if (!world_mutex_ready) {
+        g_mutex_init(&world_mutex);
+        world_mutex_ready = true;
+    }
     physics_thread_should_stop = false;
     physics_tick_requested = 0;
     physics_thread_running = true;
@@ -144,6 +160,18 @@ void physics_thread_wake(void) {
     if (!physics_thread_running) return;
     physics_tick_requested = 1;
     g_cond_signal(&physics_cond);
+}
+
+void world_lock(void) {
+    if (world_mutex_ready) {
+        g_mutex_lock(&world_mutex);
+    }
+}
+
+void world_unlock(void) {
+    if (world_mutex_ready) {
+        g_mutex_unlock(&world_mutex);
+    }
 }
 
 /* ------------------------------------------------------------------ */
@@ -201,8 +229,10 @@ gboolean physics_step_increment(gpointer user_data_pointer) {
     config_menu_update(parent_window);
 
     /* FTC robots: motor updates before the physics step.
-     * Note: gui_robot_tick runs on UI thread with frame_delta_time,
-     * but actual physics forces are applied in physics thread. */
+     * FIX-AUDIT: the whole UI-side world critical section (motor writes,
+     * wake signal, post-step reads) runs under world_mutex, serialized
+     * against the worker's physics_world_step. */
+    world_lock();
     gui_robot_tick(frame_delta_time);
 
     /* Signal physics thread to run one tick */
@@ -223,6 +253,7 @@ gboolean physics_step_increment(gpointer user_data_pointer) {
     }
     long_run_validation_tick_update();
     overlay_update();
+    world_unlock();
 
     return TRUE;
 }
