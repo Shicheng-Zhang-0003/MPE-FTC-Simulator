@@ -632,6 +632,26 @@ static void physics_world_step_single(physics_world *world, float dt) {
     /* Positional axis-drift correction: exactly once per tick, never in the
      * loop above (see revolute_joint.c). */
     constraint_correct_axis_drift_all(world, dt);
+    /* MPE_FTC_078: wheel-lock loop — lock mecanum wheels to their axle
+     * axis when angular velocity is below threshold, preventing pitching. */
+    {
+        float thresh_sq = g_cfg.solver.wheel_lock_omega_thresh * g_cfg.solver.wheel_lock_omega_thresh;
+        for (int i = 0; i < world->body_count; i++) {
+            rigidbody *rb = &world->bodies[i];
+             if (rb->static_state || !rb->is_mecanum) {
+                continue;
+            }
+            vector3 axle = rb->cached_axes[0];
+            if (vector3_length_squared(axle) < 0.0001f) {
+                axle = vector4_rotate_to_vector3(rb->orientation, (vector3){1.0f, 0.0f, 0.0f});
+            }
+            float omega_axle = vector3_dot(rb->angular_velocity, axle);
+            if (omega_axle * omega_axle < thresh_sq) {
+                /* Lock angular velocity to axle component only */
+                rb->angular_velocity = vector3_scaling(axle, omega_axle);
+            }
+        }
+    }
     /* Poisson restitution: one e-over-compression payment per fresh impact,
      * then short relaxation so friction sees post-bounce velocities. */
     /* TRUTH: joints must see post-bounce velocities too. Poisson without a

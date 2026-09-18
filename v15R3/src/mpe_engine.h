@@ -90,6 +90,15 @@ void a3_positional_depenetration_pass(struct physics_world *world, broadphase_pa
                                       int *pair_count_pointer, bool rebuild_broadphase);
 
 /* ------------------------------------------------------------------ */
+/* Physics thread control (v15R3: decoupled from GTK main loop)      */
+/* ------------------------------------------------------------------ */
+
+void physics_thread_start(void);
+void physics_thread_stop(void);
+bool physics_thread_is_running(void);
+void physics_thread_wake(void);  /* Signal physics thread to process one tick */
+
+/* ------------------------------------------------------------------ */
 /* Optional GTK application activation entry point                    */
 /* ------------------------------------------------------------------ */
 
