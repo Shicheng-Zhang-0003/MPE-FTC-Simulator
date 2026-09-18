@@ -18,8 +18,12 @@ int main(void) {
     constraint_pool_init(&world);
     ftc_ensure_field_walls(&world);
 
+    /* FIX-AUDIT: spawn up-field (z=-1.0) and drive 1 s. Was 3 s from
+     * origin: honest cruise covers ~4.3 m, so the run spent ~1.6 s pinned
+     * against the field wall with wheels spinning — the 63% "odometry
+     * drift" was wall-parking, not slip. 1 s covers ~1.3 m, ending mid-field. */
     ftc_robot robot;
-    int rc = ftc_robot_create(&world, &robot, 0.0f, ftc_robot_rest_height(), 0.0f, MOTOR_GB_5203_19_2);
+    int rc = ftc_robot_create(&world, &robot, 0.0f, ftc_robot_rest_height(), -1.0f, MOTOR_GB_5203_19_2);
     if (rc != 0) { printf("[FAIL] could not create robot\n"); return 1; }
 
     const float dt = 1.0f / 60.0f;
@@ -40,9 +44,9 @@ int main(void) {
     float start_x = world.bodies[robot.chassis_body].position.x;
     float start_z = world.bodies[robot.chassis_body].position.z;
 
-    /* Phase 1: Drive forward at full power for 180 ticks (3 seconds) */
-    printf("[info] Phase 1: driving forward 3s\n");
-    for (int t = 0; t < 180 && !fail; t++) {
+    /* Phase 1: Drive forward at full power for 60 ticks (1 second) */
+    printf("[info] Phase 1: driving forward 1s\n");
+    for (int t = 0; t < 60 && !fail; t++) {
         drivetrain_tank(&robot, 1.0f, 1.0f);
         drivetrain_update(&world, &robot, dt);
         physics_world_step(&world, dt);

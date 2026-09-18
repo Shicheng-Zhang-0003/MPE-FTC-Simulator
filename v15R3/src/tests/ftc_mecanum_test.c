@@ -15,8 +15,11 @@ int main(void) {
     constraint_pool_init(&world);
     ftc_ensure_field_walls(&world);
 
+    /* FIX-AUDIT: spawn up-field (x=-1.0) and strafe 2 s. Was 3 s from
+     * origin: ~1.5 m ending exactly at the wall face, so the PASS measured
+     * wall-parking. */
     ftc_robot robot;
-    int rc = ftc_robot_create(&world, &robot, 0.0f, ftc_robot_rest_height(), 0.0f, MOTOR_GB_5203_19_2);
+    int rc = ftc_robot_create(&world, &robot, -1.0f, ftc_robot_rest_height(), 0.0f, MOTOR_GB_5203_19_2);
     if (rc != 0) {
         printf("[FAIL] could not create robot\n");
         return 1;
@@ -27,7 +30,7 @@ int main(void) {
 
     const float dt = 1.0f / 60.0f;
     int fail = 0;
-    int total_ticks = 180;
+    int total_ticks = 120; /* 2 s: ~1.0 m strafe, stays in-field */
 
     for (int t = 0; t < total_ticks; t++) {
         /* Full strafe right (forward=0, strafe=1, rotate=0) */
@@ -62,7 +65,7 @@ int main(void) {
         /* TRUTH: honest roller physics strafes ~1.5 m in 3 s; gate at 0.8 m
          * (was 0.3, legalizing an 85% shortfall). */
         if (lateral_displacement < 0.8f) {
-            printf("[FAIL] robot did not strafe far enough in +X (dx=%.4f, expected >0.3)\n", dx);
+            printf("[FAIL] robot did not strafe far enough in +X (dx=%.4f, expected >0.8)\n", dx);
             fail = 1;
         } else {
             printf("[PASS] robot strafed in +X under real mecanum roller friction (dx=%.4f)\n", dx);

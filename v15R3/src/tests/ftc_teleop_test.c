@@ -15,9 +15,13 @@ int main(void) {
     constraint_pool_init(&world);
     ftc_ensure_field_walls(&world);
 
-    /* Create robot at origin, using goBILDA 30:1 motors */
+    /* Create robot up-field (z=-1.0), using goBILDA 19.2:1 motors.
+     * FIX-AUDIT: was spawned at origin driving 3 s — at honest cruise that
+     * covers ~4.3 m, so the run ended pinned against the field wall and the
+     * PASS measured wall-parking, not driving. 1.5 s from z=-1.0 stays
+     * in-field with margin. */
     ftc_robot robot;
-    int rc = ftc_robot_create(&world, &robot, 0.0f, ftc_robot_rest_height(), 0.0f, MOTOR_GB_5203_19_2);
+    int rc = ftc_robot_create(&world, &robot, 0.0f, ftc_robot_rest_height(), -1.0f, MOTOR_GB_5203_19_2);
     if (rc != 0) {
         printf("[FAIL] could not create robot\n");
         return 1;
@@ -28,7 +32,7 @@ int main(void) {
 
     const float dt = 1.0f / 60.0f;
     int fail = 0;
-    int total_ticks = 180; /* 3 seconds */
+    int total_ticks = 90; /* 1.5 seconds: ~1.9 m, stays in-field */
 
     for (int t = 0; t < total_ticks; t++) {
         /* Full forward tank drive */
@@ -68,9 +72,9 @@ int main(void) {
 
         /* Robot should have moved in some direction (z or x) */
         float total_displacement = sqrtf(dz * dz + (end_x - start_x) * (end_x - start_x));
-        /* TRUTH: 30:1 at 12V honest physics covers ~1.6 m in 3 s; gate at
-         * 1.0 m (was 0.5, legalizing an 84% shortfall). Falling alone cannot
-         * reach 1 m (dy gate below guards flips). */
+        /* TRUTH: 19.2:1 at 12V honest physics covers ~1.9 m in 1.5 s;
+         * gate at 1.0 m (was 0.5, legalizing an 84% shortfall). Falling
+         * alone cannot reach 1 m (dy gate below guards flips). */
         if (total_displacement < 1.0f /* MPE_FTC_079: require real driving, not just falling */) {
             printf("[FAIL] robot did not move (displacement=%.4f)\n", total_displacement);
             fail = 1;
