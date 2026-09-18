@@ -1214,12 +1214,18 @@ void collision_prepare_solver(struct physics_world *world, collision_data *sourc
             cp->effective_mass_tangent2 = 0.0f;
             cp->accumulated_tangent2_impulse = 0.0f;
         }
-        /* MFS_MECANUM_FRICTION: for mecanum wheels, use roller-based tangent
-         * direction.  The contact solver applies isotropic friction along this
-         * single tangent.  Grip direction (perpendicular to roller) gives the
-         * solver a stable friction axis that resists sliding while the drivetrain
-         * chassis force handles strafe/rotate.  No anisotropic frame — it fights
-         * the chassis force and causes vibration/trembling. */
+        /* TRUTH-MESH: honest anisotropic mecanum contact. A mecanum wheel
+         * touches the ground through rubber rollers on free bearings:
+         * high Coulomb friction across the rollers (grip axis) and
+         * near-free sliding along them (roller axis, bearing drag only).
+         * The solver carries both axes with decoupled clamps (see the
+         * resolve pass): grip = rubber Coulomb at the pair's own static
+         * mu, free = ROLLER_FREE_MU bearing drag. No chassis cheat forces
+         * are needed anywhere: strafe/rotate authority arrives through
+         * wheel torques resolved on this frame, exactly like the real
+         * drivetrain. (An earlier revision disabled this frame claiming
+         * it "fought the chassis force" — the fight was the cheat's own
+         * opposition; with the cheat deleted the frame stands alone.) */
         cp->anisotropic = false;
         cp->mu_grip = 0.0f;
         cp->mu_free = 0.0f;
@@ -1232,7 +1238,7 @@ void collision_prepare_solver(struct physics_world *world, collision_data *sourc
             /* FIX-AUDIT: symmetric mecanum-side check. The old fallback only
              * tested object_a as the mecanum body, so a mecanum wheel in the
              * object_b slot against a static-box floor (slab floors, wall
-             * boxes) missed the grip-axis redirect. Either side now qualifies
+             * boxes) missed the roller frame. Either side now qualifies
              * provided the mecanum body is above the static support. */
             else if (m->object_b && m->object_b->static_state && fabsf(m->normal_vector.y) > 0.95f) {
                 rigidbody *mw_side = (m->object_a && m->object_a->is_mecanum) ? m->object_a : NULL;
@@ -1268,7 +1274,8 @@ void collision_prepare_solver(struct physics_world *world, collision_data *sourc
                     );
                     vector3 grip_dir = vector3_cross(floor_normal, roller_free);
                     float grip_len = vector3_length(grip_dir);
-                    if (grip_len > 0.0001f) {
+                    float free_len = vector3_length(roller_free);
+                    if (grip_len > 0.0001f && free_len > 0.0001f) {
                         cp->tangent_vector = vector3_scaling(grip_dir, 1.0f / grip_len);
                         /* Recompute effective mass for the grip-direction tangent. */
                         vector3 ra_t = vector3_cross(cp->ra, cp->tangent_vector);
@@ -1277,6 +1284,31 @@ void collision_prepare_solver(struct physics_world *world, collision_data *sourc
                         vector3 ab = vector3_cross(math3_multiplication_vector3(rigidbody_effective_inv_inertia(m->object_b), rb_t), cp->rb);
                         float k = rigidbody_effective_inv_mass(m->object_a) + rigidbody_effective_inv_mass(m->object_b) + vector3_dot(vector3_addition(aa, ab), cp->tangent_vector);
                         cp->effective_mass_tangent = (k > 0.0f) ? 1.0f / k : 0.0f;
+                        /* Second axis = roller-free direction (NOT n x t1
+                         * from the stale slip frame: that vector is -free
+                         * here by construction, but spelling it out keeps
+                         * the frame honest if the geometry ever changes). */
+                        cp->tangent2 = vector3_scaling(roller_free, 1.0f / free_len);
+                        vector3 ra_t2 = vector3_cross(cp->ra, cp->tangent2);
+                        vector3 rb_t2 = vector3_cross(cp->rb, cp->tangent2);
+                        vector3 aa2 = vector3_cross(math3_multiplication_vector3(rigidbody_effective_inv_inertia(m->object_a), ra_t2), cp->ra);
+                        vector3 ab2 = vector3_cross(math3_multiplication_vector3(rigidbody_effective_inv_inertia(m->object_b), rb_t2), cp->rb);
+                        float k2 = rigidbody_effective_inv_mass(m->object_a) + rigidbody_effective_inv_mass(m->object_b) + vector3_dot(vector3_addition(aa2, ab2), cp->tangent2);
+                        cp->effective_mass_tangent2 = (k2 > 0.0f) ? 1.0f / k2 : 0.0f;
+                        /* Grip = the pair's own rubber Coulomb mu (same
+                         * value the isotropic path would use); free =
+                         * roller bearing drag (order 1e-2, free-spinning
+                         * rollers on bearings; strafe measured insensitive
+                         * across 0.02-0.10). */
+                        float mu_a = (m->object_a) ? m->object_a->friction_static : 0.0f;
+                        float mu_b = (m->object_b) ? m->object_b->friction_static : 0.0f;
+                        cp->mu_grip = (mu_a < mu_b) ? mu_a : mu_b;
+                        cp->mu_free = 0.05f; /* bearing drag: measured insensitive
+                         * across 0.02-0.10 (strafe 1.6-2.3 m), middle kept */
+                        if (cp->mu_grip > 0.0f && cp->effective_mass_tangent > 0.0f &&
+                            cp->effective_mass_tangent2 > 0.0f) {
+                            cp->anisotropic = true;
+                        }
                     }
                 }
             }

@@ -9,11 +9,10 @@
 
 #define FTC_MAX_WHEELS 8
 
-/* FIX-AUDIT: single-source build geometry. These values match the
- * construction constants in robot.c (CHASSIS/WHEEL macros) and replace the
- * scattered literals (0.48 track, 0.05 radius, 3.3 kg mass) that drifted
- * ~7% from the plant in drivetrain.c. Live code prefers measuring the
- * actual bodies and falls back to these. */
+/* FIX-AUDIT: single-source build geometry (was scattered 0.48/0.05/3.3
+ * literals drifting from the plant). Only the wheel radius is still read
+ * in code (odometry fallback); track/arm remain as the documented build
+ * geometry for tests and tooling. */
 #define FTC_TRACK_WIDTH_M 0.517f /* 2 * (0.2285 + 0.02 + 0.01) */
 #define FTC_MECANUM_ARM_M 0.4585f /* (0.2585 + 0.20): standard lx+lz yaw arm */
 #define FTC_WHEEL_RADIUS_M 0.048f /* 96 mm goBILDA mecanum */
@@ -38,14 +37,10 @@ typedef struct {
 
     /* Axle direction in chassis-local space (for reading wheel speed) */
     float axle_axis_x, axle_axis_y, axle_axis_z;
-    /* MPE_FTC_082: mecanum chassis-force fields (one-shot per tick) */
-    vector3 mecanum_chassis_force;
-    float mecanum_chassis_torque;
-    /* FIX-AUDIT: raw strafe/rotate inputs for the chassis-force path, scaled
-     * by LIVE mass/geometry in drivetrain_update (a hardcoded 3.3 kg used to
-     * live in drivetrain_mecanum and drift with any mass change). */
-    float mecanum_strafe_cmd;
-    float mecanum_rotate_cmd;
+    /* TRUTH-MESH: chassis-force cheat fields REMOVED (were one-shot strafe/
+     * rotate forces + raw command carries). Lateral/yaw authority now
+     * arrives through wheel torques on the anisotropic roller frame, so
+     * nothing outside the contact solver pushes the chassis. */
     /* FIX-AUDIT: per-robot teleop shaping state. The stick smoother used to
      * be process-global singletons shared across all robots. */
     float smooth_fwd, smooth_strafe, smooth_rot;

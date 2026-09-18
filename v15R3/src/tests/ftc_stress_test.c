@@ -139,7 +139,7 @@ int main(void) {
 
         if (rotate_counting) {
             float dtheta = robot.odom_theta - prev_theta;
-            rotate_theta_increase += fabsf(dtheta); /* MFS_310: rotate+ = CW spin; validate magnitude */
+            rotate_theta_increase += fabsf(dtheta); /* rotate+ = CCW; magnitude gate (direction pinned by tank parity) */
             prev_theta = robot.odom_theta;
         }
 
