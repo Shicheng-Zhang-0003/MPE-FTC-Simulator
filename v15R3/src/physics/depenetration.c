@@ -154,8 +154,6 @@ void a3_positional_depenetrate_manifold(collision_data *manifold) {
     }
 
     float max_depth = 0.0f;
-    float depth_sum = 0.0f;
-    int depth_count = 0;
 
     /* TRUTH P0-12: single slop. Solver slop is the sole overlap tolerance;
      * a second depenetration slop (5mm vs solver 10mm) makes the passes
@@ -166,10 +164,6 @@ void a3_positional_depenetrate_manifold(collision_data *manifold) {
         float depth = manifold->contacts[contact_index].penetration;
         if (depth > max_depth) {
             max_depth = depth;
-        }
-        if (depth > penetration_slop) {
-            depth_sum += depth;
-            depth_count++;
         }
     }
 
@@ -216,14 +210,9 @@ void a3_positional_depenetrate_manifold(collision_data *manifold) {
         return;
     }
 
-    if (depth_count == 0) {
-        depth_sum = max_depth;
-        depth_count = 1;
-    }
-
     /* FIX-AUDIT: use max_depth (not average) to fully correct the deepest
      * corner per pass. Average under-corrects by (max-avg)*factor, causing
-     * leaning stacks. */
+     * leaning stacks. (The average accumulators were dead stores.) */
     float correction_magnitude =
         (max_depth - penetration_slop) * g_cfg.depenetration.correction_factor / inverse_mass_sum; /* MPE_TASK_30 */
 

@@ -13,6 +13,7 @@ Usage:
     python tools/test_runner.py driven_wheel # Run specific test
 """
 
+import os
 import subprocess
 import sys
 import time
@@ -171,16 +172,23 @@ def run_test(name: str, timeout: int = 60) -> TestResult:
         return result
 
     binary = SRC_DIR / f"test_{name}"
+    if os.name == "nt":
+        # WIN_PORT: MinGW gcc appends .exe to -o outputs; the extensionless
+        # name never exists on Windows.
+        binary = binary.with_suffix(".exe")
     if not binary.exists():
         result.stderr = f"Binary not found: {binary}"
         result.duration = time.monotonic() - start
         return result
 
-    try:
-        proc = subprocess.run(
+    def launch() -> "subprocess.CompletedProcess[str]":
+        return subprocess.run(
             [str(binary)], cwd=str(SRC_DIR),
             capture_output=True, text=True, timeout=timeout,
         )
+
+    try:
+        proc = launch()
         result.stdout = proc.stdout
         result.stderr = proc.stderr
         result.exit_code = proc.returncode
@@ -188,6 +196,27 @@ def run_test(name: str, timeout: int = 60) -> TestResult:
     except subprocess.TimeoutExpired:
         result.stderr = f"Test timed out after {timeout}s"
         result.run_success = False
+    except OSError as exc:
+        # WIN_PORT: locked-down Windows boxes (WDAC / Smart App Control /
+        # real-time AV) transiently refuse to spawn freshly linked,
+        # still-reputation-less test binaries (WinError 4551) or hold the
+        # image while scanning. Never let one blocked spawn kill the whole
+        # run: wait out the scanner once, retry once, then record the FAIL.
+        blocked = (os.name == "nt" and getattr(exc, "winerror", None) == 4551)
+        if blocked:
+            time.sleep(20)
+            try:
+                proc = launch()
+                result.stdout = proc.stdout
+                result.stderr = proc.stderr
+                result.exit_code = proc.returncode
+                result.run_success = proc.returncode == 0
+            except (OSError, subprocess.TimeoutExpired) as exc2:
+                result.stderr = f"OS refused test binary after retry: {exc2}"
+                result.run_success = False
+        else:
+            result.stderr = f"OS refused test binary: {exc}"
+            result.run_success = False
 
     result.duration = time.monotonic() - start
     return result
