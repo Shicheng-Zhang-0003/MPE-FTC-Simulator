@@ -7,47 +7,61 @@ typedef struct {
     bool w_key_pressed, a_key_pressed, s_key_pressed, d_key_pressed, space_key_pressed, shift_key_pressed, escape_key_pressed, f_key_pressed;
     /* q_key_pressed REMOVED (dead MFS bridge flag, zero consumers).
      * m_key_pressed REMOVED (keybind deleted).
-     * delete_key_pressed REMOVED (keybind deleted).
+     * delete_key_pressed RE-ADDED as Backspace (trackpads lack middle-click).
      * t_key_pressed REMOVED (dead flag, zero consumers; terminal opens via 1).
      * left_mouse_button_clicked REMOVED (dead flag; click only locks mouse).
      * left/right_arrow REMOVED (pre-dialog change-rate relics). */
-/* MPE_TASK_22_ENTER_SPAWN_FIELD_BEGIN */
-bool enter_spawn_held;
-/* MPE_TASK_22_ENTER_SPAWN_FIELD_END */
-/* MPE_TASK_21_KEYBOARD_ONLY_FIELDS_BEGIN (r only; m/t/delete removed) */
-bool r_key_pressed;
-/* MPE_TASK_21_KEYBOARD_ONLY_FIELDS_END */
+     /* MPE_TASK_22_ENTER_SPAWN_FIELD_BEGIN */
+  bool enter_spawn_held;
+  /* MPE_TASK_22_ENTER_SPAWN_FIELD_END */
+  /* MPE_TASK_21_KEYBOARD_ONLY_FIELDS_BEGIN (r only; m/t/delete removed) */
+ bool r_key_pressed;
+ /* MPE_TASK_21_KEYBOARD_ONLY_FIELDS_END */
     // Camera Emulation (IJKL)
     bool i_key_pressed, j_key_pressed, k_key_pressed, l_key_pressed;
     //File Load Inputs
     bool is_menu_open;
     bool menu_1_pressed, menu_2_pressed, menu_3_pressed;
-bool menu_4_pressed, menu_5_pressed, menu_6_pressed; /* MPE_TASK_35 */
+ bool menu_4_pressed, menu_5_pressed, menu_6_pressed; /* MPE_TASK_35 */
     //Spawn Object Status
     int spawner_menu_level;
     int velocity_menu_level;
     int object_menu_level;
     int current_spawn_type; // 0: Sphere, 1: Cube, 2: Cylinder
     bool up_arrow_pressed, down_arrow_pressed, enter_key_pressed, e_key_pressed;
-bool stability_test_pressed;
-bool sleep_wake_test_pressed;
-bool editor_torture_pressed;
-bool spawn_stress_pressed;
-bool validation_report_pressed;
-/* MPE_TASK_18_TERMINAL_INPUT_FIELD_BEGIN */
-bool debug_terminal_pressed;
-/* MPE_TASK_18_TERMINAL_INPUT_FIELD_END */
-/* MPE_TASK_13_LONG_RUN_INPUT_BEGIN */
-bool long_run_validation_pressed;
-/* MPE_TASK_13_LONG_RUN_INPUT_END */
-/* MPE_TASK_39_CONFIG_TORTURE_INPUT_BEGIN */
-bool config_torture_pressed;
-/* MPE_TASK_39_CONFIG_TORTURE_INPUT_END */
+ /* Object delete (Backspace; trackpads have no middle-click). e_key_held is
+  * the anti-repeat latch so holding E cannot re-trigger the menu toggle. */
+ bool delete_key_pressed;
+ bool e_key_held;
+ bool stability_test_pressed;
+ bool sleep_wake_test_pressed;
+ bool editor_torture_pressed;
+ bool spawn_stress_pressed;
+ bool validation_report_pressed;
+ /* MPE_TASK_18_TERMINAL_INPUT_FIELD_BEGIN */
+ bool debug_terminal_pressed;
+ /* MPE_TASK_18_TERMINAL_INPUT_FIELD_END */
+ /* MPE_TASK_13_LONG_RUN_INPUT_BEGIN */
+ bool long_run_validation_pressed;
+ /* MPE_TASK_13_LONG_RUN_INPUT_END */
+ /* MPE_TASK_39_CONFIG_TORTURE_INPUT_BEGIN */
+ bool config_torture_pressed;
+ /* MPE_TASK_39_CONFIG_TORTURE_INPUT_END */
     //Mouse Status Inputs
     bool is_mouse_locked, is_debug_mode_active;
     bool right_mouse_button_clicked, middle_mouse_button_clicked;
+    /* Per-frame accumulated mouse deltas (cleared at frame start).
+     * Unified relative tracking on both Linux and Windows. */
     float mouse_delta_x, mouse_delta_y;
+    float mouse_delta_accum_x, mouse_delta_accum_y;
     bool suppress_mouse_delta;
+    /* Unified relative tracking state (both platforms).
+     * Tracks last event position in WIDGET space for HiDPI consistency. */
+    int last_mouse_x;
+    int last_mouse_y;
+    bool mouse_centered;
+    /* Lock state machine: 0=unlocked, 1=locking, 2=locked, 3=unlocking */
+    int mouse_lock_state;
     int marked_joint_object_index; // -1 if none is marked
 } input_status;
 //Initialise input state to zeroing

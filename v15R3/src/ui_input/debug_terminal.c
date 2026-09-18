@@ -19,6 +19,8 @@ char term_cwd[256] = "/";
 char term_history[term_history_size][term_history_length + 1];
 int term_history_count = 0;
 int term_history_cursor = -1;
+static GtkWidget *terminal_parent_window = NULL;
+static bool terminal_mouse_was_locked = false;
 
 /* ------------------------------------------------------------------ */
 /* Output helpers                                                      */
@@ -572,6 +574,10 @@ static void on_terminal_window_destroy(GtkWidget *widget) {
     terminal_prompt_label = NULL;
     term_history_cursor = -1;
     term_capture_reset(); /* FIX_030: free capture buffer on close */
+    if (terminal_mouse_was_locked && terminal_parent_window) {
+        mouse_lock_enable(terminal_parent_window);
+        main_inputs.is_mouse_locked = true;
+    }
 }
 /* ------------------------------------------------------------------ */
 /* Public interface                                                    */
@@ -611,6 +617,7 @@ void debug_terminal_open(GtkWidget *parent_window) {
     gtk_window_set_default_size(GTK_WINDOW(terminal_window), 820, 560);
     if ((parent_window) && (GTK_IS_WIDGET(parent_window))) {
         gtk_window_set_transient_for(GTK_WINDOW(terminal_window), GTK_WINDOW(parent_window));
+        terminal_parent_window = parent_window;
     }
     g_signal_connect(terminal_window, "destroy", G_CALLBACK(on_terminal_window_destroy), NULL);
     g_signal_connect(terminal_window, "key-press-event", G_CALLBACK(on_terminal_window_keypress), NULL);
@@ -661,10 +668,13 @@ void debug_terminal_open(GtkWidget *parent_window) {
     g_signal_connect(terminal_entry, "activate", G_CALLBACK(on_terminal_entry_activate), NULL);
     g_signal_connect(terminal_entry, "key-press-event", G_CALLBACK(on_terminal_entry_keypress), NULL);
     if (main_inputs.is_mouse_locked) {
+        terminal_mouse_was_locked = true;
         if ((parent_window) && (GTK_IS_WIDGET(parent_window))) {
             mouse_lock_disable(parent_window);
         }
         main_inputs.is_mouse_locked = false;
+    } else {
+        terminal_mouse_was_locked = false;
     }
     /* FIX_TEXT_VIS: per-widget light-text CSS at USER+1. The screen-level
      * theme above loses to aggressive (Windows) theme engines, leaving
