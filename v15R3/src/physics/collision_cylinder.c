@@ -74,28 +74,53 @@ bool collision_static_plane_cylinder(rigidbody *cyl, float plane_y, collision_da
 
     /*
      * Near-horizontal axle:
-     * generate two contacts at the axle ends for stability.
+     * generate a smooth contact patch along the cylinder length for stable rolling.
      * This is the normal FTC wheel case.
-     * Slop-gated (see clip_obb_faces): wheels rolling within slop keep
-     * persistent friction contacts instead of flickering support.
+     * Multiple contacts distributed along the cylinder length and around the
+     * contact patch prevent the "bumpy" sensation from discrete axle-end contacts.
+     * Slop-gated: wheels rolling within slop keep persistent friction contacts
+     * instead of flickering support.
+     * Max 4 contacts per manifold (collision_data::contacts[4] limit).
      */
     if (fabsf(ay) < 0.35f) {
-        float axle_offsets[2] = {-h, h};
         float wheel_slop = g_cfg.solver.penetration_slop;
 
-        for (int i = 0; i < 2; i++) {
-            vector3 end_center =
-                vector3_addition(cyl->position, vector3_scaling(axis, axle_offsets[i]));
+        /* Number of contact stations along cylinder length (axle direction).
+         * 2 stations (ends) gives stable rolling without exceeding 4 contacts. */
+        const int num_stations = 2;
+        /* Number of contact points around the contact patch at each station.
+         * 2 points: bottom center and slightly forward for rolling smoothness. */
+        const int num_azimuths = 2;
 
-            vector3 contact_point = vector3_addition(end_center, radial);
-            float local_penetration = plane_y - contact_point.y;
+        for (int station = 0; station < num_stations; station++) {
+            /* Station position along axle: at the ends (-h, +h) */
+            float axle_offset = (station == 0) ? -h : h;
 
-            if ((local_penetration > -wheel_slop) && (collision_output_data->contact_count < 2)) {
-                contact_point_data *cp =
-                    &collision_output_data->contacts[collision_output_data->contact_count];
-                cp->position = contact_point;
-                cp->penetration = (local_penetration > 0.0f) ? local_penetration : 0.0f;
-                collision_output_data->contact_count++;
+            vector3 station_center =
+                vector3_addition(cyl->position, vector3_scaling(axis, axle_offset));
+
+            for (int az = 0; az < num_azimuths; az++) {
+                /* Azimuth angle around cylinder: bottom center and slightly forward.
+                 * This gives a small contact patch that rolls smoothly. */
+                float az_angle = (az == 0) ? 0.0f : 0.15f; /* 0 and ~8.6 degrees forward */
+
+                /* Rotate radial vector around axle by az_angle */
+                vector3 radial_rotated = vector3_addition(
+                    vector3_scaling(radial, cosf(az_angle)),
+                    vector3_scaling(vector3_cross(axis, radial), sinf(az_angle))
+                );
+
+                vector3 contact_point = vector3_addition(station_center, radial_rotated);
+                float local_penetration = plane_y - contact_point.y;
+
+                if ((local_penetration > -wheel_slop) &&
+                    (collision_output_data->contact_count < 4)) {
+                    contact_point_data *cp =
+                        &collision_output_data->contacts[collision_output_data->contact_count];
+                    cp->position = contact_point;
+                    cp->penetration = (local_penetration > 0.0f) ? local_penetration : 0.0f;
+                    collision_output_data->contact_count++;
+                }
             }
         }
     }
