@@ -626,16 +626,13 @@ static void physics_world_step_single(physics_world *world, float dt) {
              * A second immediate visit converges the local distribution
              * before propagating, buying back the margin deep stacks
              * need at low global iteration counts. Deterministic. */
-            collision_resolve_iterative(&world->manifolds[m], dt, false, iter);
+collision_resolve_iterative(&world->manifolds[m], dt, false, iter);
             collision_resolve_iterative(&world->manifolds[m], dt, false, iter + 1);
         }
         /* MFS_SOLVER_FIX: solve joints inside the iteration loop so friction
          * impulses properly transfer through revolute constraints to the chassis */
         constraint_solve_all(world, dt);
     }
-    /* Positional axis-drift correction: exactly once per tick, never in the
-     * loop above (see revolute_joint.c). */
-    constraint_correct_axis_drift_all(world, dt);
     /* MPE_FTC_078: wheel-lock loop — lock mecanum wheels to their axle
      * axis when angular velocity is below threshold, preventing pitching. */
     {
@@ -656,12 +653,12 @@ static void physics_world_step_single(physics_world *world, float dt) {
             }
         }
     }
+    /* Baumgarte positional correction now runs inside revolute_solve each iteration.
+     * Axis drift correction handled separately if needed. */
+    /* constraint_correct_axis_drift_all(world, dt); */
     /* Poisson restitution: one e-over-compression payment per fresh impact,
      * then short relaxation so friction sees post-bounce velocities. */
-    /* TRUTH: joints must see post-bounce velocities too. Poisson without a
-     * joint relaxation leaves hinges/welds broken for a tick. */
     collision_apply_poisson_restitution(world->manifolds, manifold_count);
-    constraint_solve_all(world, dt);
     for (int relax_iter = 0; relax_iter < 2; relax_iter++) {
         for (int o = 0; o < manifold_count; o++) {
             int m = world->manifold_order[o];

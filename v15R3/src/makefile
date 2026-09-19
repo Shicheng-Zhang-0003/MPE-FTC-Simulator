@@ -49,6 +49,11 @@ help:
 	@echo "         mpe-tui (terminal debugger + snapshot suite) | tui-smoke"
 	@echo "         flow: python3 ../../tools/test_runner.py"
 
+$(BUILD_DIR)/physics/revolute_joint.o: physics/revolute_joint.c
+	@mkdir -p $(dir $@)
+	$(CC) $(BASE_CFLAGS) -O0 -c $< -o $@
+	@$(CC) -MM -MP -MT $@ -MF $(@:.o=.d) $(SYS_CFLAGS) -I. $<
+
 $(BUILD_DIR)/%.o: %.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
