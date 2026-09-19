@@ -55,7 +55,7 @@ void revolute_solve(revolute_params *p, rigidbody *body_a, rigidbody *body_b, fl
     vector3 r_a = vector4_rotate_to_vector3(body_a->orientation, p->anchor_a);
     vector3 r_b = vector4_rotate_to_vector3(body_b->orientation, p->anchor_b);
 
-    /* ---- point-to-point ---- */
+    /* ---- point-to-point velocity solve (with Baumgarte bias per iteration) ---- */
     vector3 anchor_a_world = vector3_addition(body_a->position, r_a);
     vector3 anchor_b_world = vector3_addition(body_b->position, r_b);
     vector3 position_error = vector3_subtraction(anchor_b_world, anchor_a_world);
@@ -82,31 +82,10 @@ void revolute_solve(revolute_params *p, rigidbody *body_a, rigidbody *body_b, fl
     vector3 vel_b_at_anchor = vector3_addition(body_b->velocity, vector3_cross(body_b->angular_velocity, r_b));
     vector3 relative_velocity = vector3_subtraction(vel_b_at_anchor, vel_a_at_anchor);
 
-    /* Live tunable (was hardcoded 0.3): positional correction stiffness. */
-    const float baumgarte_beta = g_cfg.joints.revolute_beta;
-    /* Clamp the bias SPEED (Catto's stabilized Baumgarte): an uncapped
-     * beta/dt turns a large anchor gap into a multi-m/s velocity demand in
-     * one tick. Against a contact face the joint then re-injects approach
-     * every iteration while the contact re-stops it — accumulated normal
-     * impulse grows without bound, inflating Poisson restitution and the
-     * friction cone (measured 7x: acc_n 43 from a 6 m/s impact). The cap
-     * bounds per-tick energy injection; steady-state mm errors never bind. */
-    float bias_speed = baumgarte_beta * vector3_length(position_error) / dt;
-    float max_bias_speed = g_cfg.joints.revolute_max_bias;
-    vector3 bias;
-    /* TRUTH: slop deadband. Correcting sub-slop misalignment injects
-     * velocity to fix invisible error, fighting contact static hold and
-     * pumping creep (measured: coasting robot never rests). The velocity
-     * solve alone holds zero relative velocity inside slop. */
-    if (vector3_length_squared(position_error) <
-        g_cfg.solver.penetration_slop * g_cfg.solver.penetration_slop) {
-        bias = vector3_zero();
-    } else if ((bias_speed > max_bias_speed) && (bias_speed > 0.0f)) {
-        bias = vector3_scaling(position_error, (baumgarte_beta / dt) * (max_bias_speed / bias_speed));
-    } else {
-        bias = vector3_scaling(position_error, baumgarte_beta / dt);
-    }
+    /* Use pre-computed Baumgarte bias from pre_step (once per tick) */
+    vector3 bias = p->positional_bias;
 
+    /* Solve for zero relative velocity + Baumgarte bias at anchors */
     float inv_mass_sum = inv_mass_a + inv_mass_b;
     math3 k = {{{0.0f}}};
     for (int i = 0; i < 3; i++) {
@@ -202,7 +181,7 @@ void revolute_solve(revolute_params *p, rigidbody *body_a, rigidbody *body_b, fl
             p->reference_axis_a = vector4_rotate_to_vector3(body_a->orientation, vector3_normalisation(p->axis_a));
             p->reference_axis_b = vector4_rotate_to_vector3(body_b->orientation,
                 (vector3_length_squared(p->axis_b) > 1e-12f) ? vector3_normalisation(p->axis_b)
-                                                              : vector3_normalisation(p->axis_a));
+                                                            : vector3_normalisation(p->axis_a));
             p->angle_initialized = true;
         }
 
@@ -244,10 +223,33 @@ void revolute_solve(revolute_params *p, rigidbody *body_a, rigidbody *body_b, fl
  * This reads the angle straight from relative orientation every tick
  * (same math as limit init); accumulated_angle is readout state. */
 void revolute_pre_step(revolute_params *p, rigidbody *body_a, rigidbody *body_b, float dt) {
-    (void) dt;
-    if ((!p) || (!body_a) || (!body_b)) {
+    if ((!p) || (!body_a) || (!body_b) || (!(dt > 0.0f))) {
         return;
     }
+
+    /* ---- Compute Baumgarte positional bias (once per tick) ---- */
+    vector3 r_a = vector4_rotate_to_vector3(body_a->orientation, p->anchor_a);
+    vector3 r_b = vector4_rotate_to_vector3(body_b->orientation, p->anchor_b);
+    vector3 anchor_a_world = vector3_addition(body_a->position, r_a);
+    vector3 anchor_b_world = vector3_addition(body_b->position, r_b);
+    vector3 position_error = vector3_subtraction(anchor_b_world, anchor_a_world);
+    float position_error_len = vector3_length(position_error);
+    float slop = g_cfg.solver.penetration_slop;
+    if (position_error_len <= slop) {
+        p->positional_bias = vector3_zero();
+    } else {
+        /* Baumgarte bias velocity (per Catto's stabilized Baumgarte) */
+        const float baumgarte_beta = g_cfg.joints.revolute_beta;
+        float bias_speed = baumgarte_beta * position_error_len / dt;
+        float max_bias_speed = g_cfg.joints.revolute_max_bias;
+        if ((bias_speed > max_bias_speed) && (bias_speed > 0.0f)) {
+            p->positional_bias = vector3_scaling(position_error, (baumgarte_beta / dt) * (max_bias_speed / bias_speed));
+        } else {
+            p->positional_bias = vector3_scaling(position_error, baumgarte_beta / dt);
+        }
+    }
+
+    /* ---- Angle tracking for limits (unchanged) ---- */
     if (!p->limits_enabled || !p->angle_initialized) {
         return;
     }
@@ -358,9 +360,10 @@ void prismatic_solve(prismatic_params *p, rigidbody *body_a, rigidbody *body_b, 
                         bias_d = max_b;
                     } else if (bias_d < -max_b) {
                         bias_d = -max_b;
-                    }
-                }
-                vector3 ra_d = vector3_cross(r_a, dir);
+}
+}
+
+vector3 ra_d = vector3_cross(r_a, dir);
                 vector3 rb_d = vector3_cross(r_b, dir);
                 float k_d = inv_a + inv_b +
                             vector3_dot(ra_d, math3_multiplication_vector3(rigidbody_effective_inv_inertia(body_a),
@@ -421,6 +424,84 @@ void prismatic_solve(prismatic_params *p, rigidbody *body_a, rigidbody *body_b, 
             }
         }
     }
+}
+
+/* Positional point-to-point drift correction: MUST be called exactly once per tick,
+ * AFTER the velocity iteration loop — never inside it. The error term is
+ * positional (anchor gap, unchanged by velocity iterations), so per-iteration
+ * application multiplies the correction by the iteration count (64x at defaults):
+ * a spurious spring that pumps energy into wheel joints, causing vibration
+ * and preventing rest (measured: coasting robot never sleeps). */
+void revolute_correct_positional_drift(revolute_params *p, rigidbody *body_a, rigidbody *body_b, float dt) {
+    if ((!p) || (!body_a) || (!body_b) || (dt <= 0.0f)) {
+        return;
+    }
+    vector3 r_a = vector4_rotate_to_vector3(body_a->orientation, p->anchor_a);
+    vector3 r_b = vector4_rotate_to_vector3(body_b->orientation, p->anchor_b);
+
+    /* ---- point-to-point positional correction ---- */
+    vector3 anchor_a_world = vector3_addition(body_a->position, r_a);
+    vector3 anchor_b_world = vector3_addition(body_b->position, r_b);
+    vector3 position_error = vector3_subtraction(anchor_b_world, anchor_a_world);
+    float position_error_len_sq = vector3_length_squared(position_error);
+    float slop_sq = g_cfg.solver.penetration_slop * g_cfg.solver.penetration_slop;
+    if (position_error_len_sq <= slop_sq) {
+        return; /* Inside slop: no positional correction needed */
+    }
+
+    float inv_mass_a = rigidbody_effective_inv_mass(body_a);
+    float inv_mass_b = rigidbody_effective_inv_mass(body_b);
+    if ((inv_mass_a <= 0.0f) && (inv_mass_b <= 0.0f)) {
+        return;
+    }
+
+    /* Baumgarte bias velocity (clamped per Catto's stabilized Baumgarte).
+     * Scale by solver iterations to match the total per-tick correction of the
+     * old 64-iteration version (beta applied per iteration), but applied as a
+     * single impulse to avoid energy pumping from repeated applications.
+     * Max bias also scaled by iterations to match old per-tick effective cap. */
+    const float baumgarte_beta = g_cfg.joints.revolute_beta * (float) g_cfg.timestep.solver_iterations;
+    const float max_bias_speed = g_cfg.joints.revolute_max_bias * (float) g_cfg.timestep.solver_iterations;
+    float bias_speed = baumgarte_beta * sqrtf(position_error_len_sq) / dt;
+    vector3 bias;
+    if ((bias_speed > max_bias_speed) && (bias_speed > 0.0f)) {
+        bias = vector3_scaling(position_error, (baumgarte_beta / dt) * (max_bias_speed / bias_speed));
+    } else {
+        bias = vector3_scaling(position_error, baumgarte_beta / dt);
+    }
+
+    /* Solve for positional correction impulse */
+    float inv_mass_sum = inv_mass_a + inv_mass_b;
+    math3 k = {{{0.0f}}};
+    for (int i = 0; i < 3; i++) {
+        k.matrix[i][i] = inv_mass_sum;
+    }
+    math3 skew_a = skew_symmetric(r_a);
+    math3 skew_b = skew_symmetric(r_b);
+    math3 term_a = math3_multiplication(skew_a, math3_multiplication(rigidbody_effective_inv_inertia(body_a), skew_a));
+    math3 term_b = math3_multiplication(skew_b, math3_multiplication(rigidbody_effective_inv_inertia(body_b), skew_b));
+    for (int i = 0; i < 3; i++) {
+        for (int j = 0; j < 3; j++) {
+            k.matrix[i][j] -= term_a.matrix[i][j];
+            k.matrix[i][j] -= term_b.matrix[i][j];
+        }
+    }
+    math3 k_inv = math3_inverse(k);
+    /* Only bias velocity (no relative velocity term - that's handled in revolute_solve) */
+    vector3 rhs = vector3_scaling(bias, -1.0f);
+    vector3 impulse = math3_multiplication_vector3(k_inv, rhs);
+
+    /* Apply positional correction impulse */
+    body_a->velocity = vector3_subtraction(body_a->velocity, vector3_scaling(impulse, inv_mass_a));
+    body_b->velocity = vector3_addition(body_b->velocity, vector3_scaling(impulse, inv_mass_b));
+    body_a->angular_velocity =
+        vector3_subtraction(body_a->angular_velocity,
+                            math3_multiplication_vector3(rigidbody_effective_inv_inertia(body_a),
+                                                         vector3_cross(r_a, impulse)));
+    body_b->angular_velocity =
+        vector3_addition(body_b->angular_velocity,
+                         math3_multiplication_vector3(rigidbody_effective_inv_inertia(body_b),
+                                                      vector3_cross(r_b, impulse)));
 }
 
 /* TRUTH: once-per-tick slide tracking (called before the solver loop). */

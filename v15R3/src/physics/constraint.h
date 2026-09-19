@@ -34,6 +34,8 @@ typedef struct {
     bool angle_initialized;
     vector3 reference_axis_a;
     vector3 reference_axis_b;
+    /* Baumgarte positional bias computed once per tick in pre_step. */
+    vector3 positional_bias;
 } revolute_params;
 
 typedef struct {
