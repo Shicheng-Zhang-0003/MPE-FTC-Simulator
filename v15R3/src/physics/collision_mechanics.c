@@ -1278,7 +1278,7 @@ void collision_prepare_solver(struct physics_world *world, collision_data *sourc
                         cos_a = cosf(mw->roller_angle_rad);
                         sin_a = sinf(mw->roller_angle_rad);
                     }
-                    vector3 perp = vector3_cross(floor_normal, axle_proj);
+                    vector3 perp = vector3_cross(axle_proj, floor_normal);
                     vector3 roller_free = vector3_addition(
                         vector3_scaling(axle_proj, cos_a),
                         vector3_scaling(perp, sin_a)
