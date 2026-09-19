@@ -1,30 +1,36 @@
-MPE Evolution Lineage
+MFS Evolution Lineage
 =====================
 
 V0.9-Buffer:  Direct Translation Layer from V1.5RC2 of MPE
 V1.5RC2:      v15R2 — Configuration System (80 tunables, registry, menu)
 MFS:          MPE FTC Simulator — Physics-first pivot (live in src/robotics/;
-               robotics_backup/ keeps pre-transplant history)
-               Milestone 1: Foundation & Robotics Core ✅
-               Milestone 2: Physics Keystone (cylinders, anisotropic friction) ✅
-               Milestone 3: Solver Hardening (in progress)
+              robotics_backup/ keeps pre-transplant history)
+              Milestone 1: Foundation & Robotics Core ✅
+              Milestone 2: Physics Keystone (cylinders, anisotropic friction) ✅
+              Milestone 3: Solver Hardening (in progress)
 
-Current Head: v15R3 (MPE-only release, tagged; tree frozen to
+Current Head: v15R3 (MFS release, tagged; tree frozen to
               correctness/stability/validation/docs/hygiene)
 Truth Pass:   Verlet-exact free flight, strict warm-start, true cylinder SDF,
-               CCD remainder, no clamps/caps/hysteresis, F11 torture guardrails
-               (gravity -17..-1, iters >=96, robustness verdict). 36/36 green
-               (29 MPE + frustum + 7 FTC).
+              CCD remainder, no clamps/caps/hysteresis, F11 torture guardrails
+              (gravity -17..-1, iters >=96, robustness verdict). 36/36 green
+              (29 MPE + frustum + 7 FTC).
 Sleep Truth:  three-gate wake (first-touch pair novelty + fast-other + deep);
               F10 10-stack settles to all-asleep, KE=0 at 60 s.
 TUI Suite:    mpe-tui live ncurses inspector + deterministic --snapshot /
-               --stream dumps (demo/tower/pendulum/springlab/f10/ftc scenes).
+              --stream dumps (demo/tower/pendulum/springlab/f10/ftc scenes).
 Adversarial:  f10_long_run (settle incl. run-max), sleep_contact_wake
               (slow-pusher first-touch + no-churn control), f11_torture
               (fixed-seed config extremes, corruption gates).
 Spawning:     cylinders spawnable (Enter type 3, menu 8 settings, touch
-               new.cyl): exact SDF contacts, ray selection, instanced mesh.
+              new.cyl): exact SDF contacts, ray selection, instanced mesh.
 Truth Mesh:   all-truth FTC drivetrain (post-tag): anisotropic rollers delete
-               the chassis cheat, traction 1x on wheels, 6 kg plant, IMU
-               heading + encoder translation, robot-relative sticks, nose
-               marker, chase default. Windows/MSYS2 supported build.
+              the chassis cheat, traction 1x on wheels, 6 kg plant, IMU
+              heading + encoder translation, robot-relative sticks, nose
+              marker, chase default. Windows/MSYS2 supported build.
+Post-Release Fixes (same freeze rules):
+- Mecum sign fix: cross(axle_proj, floor_normal) orients roller frame forward
+- Revolute Baumgarte: positional correction once/tick (not 64x) — kills vibration
+- Wheel-lock threshold: 0.5 → 0.1 rad/s
+- Traction clamp: roller_friction_coeff 1.0 → 0.8 (matches floor_friction_s)
+- Roller angles: SDK standard X (FL +45, FR -45, BL -45, BR +45)
