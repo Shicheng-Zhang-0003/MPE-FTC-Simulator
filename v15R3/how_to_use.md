@@ -1,9 +1,9 @@
-# Miniature Physics Engine — User Guide
+# MFS — MPE FTC Simulator User Guide
 ### v15R3 Release Guide
 
 ---
 
-## Starting the Engine
+## Starting the Simulator
 
 From the `src/` directory, run:
 
@@ -17,7 +17,7 @@ The window opens in Game Mode by default. Left click anywhere inside the window 
 
 ## Modes
 
-The engine has two modes, toggled with the `0` key at any time.
+The simulator has two modes, toggled with the `0` key at any time.
 
 **Game Mode** is the default. Gravity applies to the camera, WASD movement is grounded, you can jump, and the world has boundaries — objects and the camera are contained within a 500×500×500 unit box.
 
@@ -99,7 +99,7 @@ Mass, radius, and friction open a text input dialog. Immovable objects have zero
 
 ---
 
-## Driving FTC robots
+## Driving FTC Robots (MFS Core)
 
 Press `8` then `5` (or `touch robot` in the debug terminal) to spawn a ~6 kg competition-weight mecanum robot (19.2:1 goBILDA 5203s, 96 mm wheels, 12 ft field walls included). Drive with a gamepad (F310, X mode):
 
@@ -110,7 +110,7 @@ Press `8` then `5` (or `touch robot` in the debug terminal) to spawn a ~6 kg com
 
 Controls are robot-relative at any heading, and an orange nose wireframe marks the +Z front face. The camera starts behind the robot; mouse-look stays free.
 
-Model truth (no cheat forces): DC motors with gearbox drag and battery sag, anisotropic roller contact (rubber grip + free roller axes), wheel-encoder translation odometry with IMU-model heading. Headless proof: `ftc_teleop/mecanum/tank_turn/odometry/stress/registry/physics_validation` via `python3 tools/test_runner.py`.
+**Model truth (no cheat forces):** DC motors with gearbox drag and battery sag, **anisotropic roller contact with fixed sign** (rubber grip + free roller axes; cross-product order `cross(axle_proj, floor_normal)` orients grip axis forward), wheel-encoder translation odometry with IMU-model heading. **All strafe/rotate authority comes from wheel torques through the roller frame** — no chassis cheat forces. Headless proof: `ftc_teleop/mecanum/tank_turn/odometry/stress/registry/physics_validation` via `python3 tools/test_runner.py`.
 
 ---
 
@@ -159,8 +159,7 @@ Type `help` for the full command list or `man <command>` for usage. `Ctrl+L` cle
 
 ## Terminal Debugger (`mpe-tui`)
 
-A terminal-only companion binary: a live inspector and a scriptable
-state-dump suite (needs only ncurses; no GTK/OpenGL):
+A terminal-only companion binary: a live inspector and a scriptable state-dump suite (needs only ncurses; no GTK/OpenGL):
 
 ```bash
 cd src
@@ -171,14 +170,7 @@ make mpe-tui
 ./mpe-tui --snapshot 10 --scene tower|pendulum|springlab|f10|ftc|demo
 ```
 
-Live screens (`1`–`5`, `Tab` cycles): body overview, per-object
-characteristics + mathematics (quaternion, euler, inertia tensors, momentum,
-energy), joint/constraint detail with live endpoint geometry, pairwise scene
-graph, help. Keys: `j/k` select, `Space` pause, `s` single-step, `+/-`
-time scale, `/` filter, `q` quit. Snapshot sections (`[engine]`, `[body i]`,
-`[springs]`, `[constraints]`, `[pairs]`, `[islands]`, `[stats]`,
-`[result]`) are fixed-format and deterministic. `make tui-smoke` checks
-every scene dumps finite state.
+Live screens (`1`–`5`, `Tab` cycles): body overview, per-object characteristics + mathematics (quaternion, euler, inertia tensors, momentum, energy), joint/constraint detail with live endpoint geometry, pairwise scene graph, help. Keys: `j/k` select, `Space` pause, `s` single-step, `+/-` time scale, `/` filter, `q` quit. Snapshot sections (`[engine]`, `[body i]`, `[springs]`, `[constraints]`, `[pairs]`, `[islands]`, `[stats]`, `[result]`) are fixed-format and deterministic. `make tui-smoke` checks every scene dumps finite state.
 
 ---
 
@@ -224,31 +216,19 @@ In the debug terminal:
 
 ### F11 Config Torture Test
 
-Press `F11` to randomise all 80 tunables to extreme bounded values and run
-a 60-second long-run validation. This stress-tests the engine under
-adversarial parameter combinations (each press uses the next seed, printed
-for bisection). F11 is a robustness verdict: PASS means no NaN and nothing
-fell through the world — speeds are reported, never gated (under extremes,
-perpetual fall/creep can be the TRUE outcome). Solver resolution is pinned
-during torture (gravity −17…−1, ≥96 iterations — the proven envelope for the
-10:1 validation column; material/world extremes stay fully random). F10 at
-defaults keeps the full settle verdict (final < 0.25 m/s, run-max < 2.0 m/s
-past the 2 s opening transient). After the test, use
-key 6 → Reset Defaults or terminal `config reset` to restore normal behaviour.
+Press `F11` to randomise all 80 tunables to extreme bounded values and run a 60-second long-run validation. This stress-tests the engine under adversarial parameter combinations (each press uses the next seed, printed for bisection). F11 is a robustness verdict: PASS means no NaN and nothing fell through the world — speeds are reported, never gated (under extremes, perpetual fall/creep can be the TRUE outcome). Solver resolution is pinned during torture (gravity −17…−1, ≥96 iterations — the proven envelope for the 10:1 validation column; material/world extremes stay fully random). F10 at defaults keeps the full settle verdict (final < 0.25 m/s, run-max < 2.0 m/s past the 2 s opening transient). After the test, use key 6 → Reset Defaults or terminal `config reset` to restore normal behaviour.
 
 ### Truth-validation switches
 
-- `sleep.enable = 0` (terminal `export sleep.enable=0`, debug-only) disables
-  the sleep optimizer so the solver alone must settle the scene.
+- `sleep.enable = 0` (terminal `export sleep.enable=0`, debug-only) disables the sleep optimizer so the solver alone must settle the scene.
 - `nice_value` is a per-object settle tool, not physics: keep 0 for truth.
-- `world.drag` is linear-viscous retention (`c = −ln(drag)`), not quadratic
-  aero; `1.0` is vacuum truth.
+- `world.drag` is linear-viscous retention (`c = −ln(drag)`), not quadratic aero; `1.0` is vacuum truth.
 
 ---
 
 ## Validation Tests
 
-The engine includes built-in test keys for stability validation:
+The simulator includes built-in test keys for stability validation:
 
 | Key | Test |
 |---|---|
@@ -322,7 +302,7 @@ All values are in SI units (metres, kilograms, seconds).
 | Air drag coefficient | 0.99 | — |
 | Physics timestep | 60 Hz fixed | — |
 
-The engine uses a fixed 60 Hz physics timestep (decoupled physics thread); oversized steps subdivide with a 32-substep cap to prevent spiral-of-death. Each physics tick runs 64 sequential-impulse solver iterations by default (timestep.solver_iterations, 1–128), giving stable collision resolution for stacked objects and rolling behaviour. Rolling resistance applies contact-patch torque (Hertz patch, shared-patch split for body-body); static/kinetic Coulomb friction uses a two-tangent disc clamp (anisotropic grip/roller frame on mecanum wheels).
+The simulator uses a fixed 60 Hz physics timestep (decoupled physics thread); oversized steps subdivide with a 32-substep cap to prevent spiral-of-death. Each physics tick runs 64 sequential-impulse solver iterations by default (timestep.solver_iterations, 1–128), giving stable collision resolution for stacked objects and rolling behaviour. **Revolute joint positional correction (Baumgarte) runs once/tick** — computed in `pre_step`, applied in velocity solve; eliminates spurious spring energy that caused wheel vibration and prevented rest. Rolling resistance applies contact-patch torque (Hertz patch, shared-patch split for body-body); static/kinetic Coulomb friction uses a two-tangent disc clamp (anisotropic grip/roller frame on mecanum wheels; cross-product order `cross(axle_proj, floor_normal)` fixes forward/strafe/rotate directions).
 
 Objects with velocity below 0.05 m/s and angular velocity below 0.01 rad/s are put to sleep automatically to prevent floating-point jitter.
 
@@ -342,7 +322,7 @@ Spheres default to blue. Cubes default to orange. Both can have their colours ch
 
 ## Performance
 
-The engine consumes approximately 1 MB of additional RAM per 1136 objects spawned. An initial run uses roughly 105 MB at rest.
+The simulator consumes approximately 1 MB of additional RAM per 1136 objects spawned. An initial run uses roughly 105 MB at rest.
 
 Broadphase collision detection uses a 3D spatial hash grid and runs once per physics substep, keeping performance stable at high object counts. Tested on a Core Ultra 5 125H with Intel Arc Graphics at 2880×1880 resolution under X11.
 
@@ -350,19 +330,20 @@ Broadphase collision detection uses a 3D spatial hash grid and runs once per phy
 
 ## Known Limitations
 
-**Wayland:** Mouse locking does not function correctly under native Wayland. The engine must be run under X11. On systems that default to Wayland, install basic X11 drivers (`xorg`, `xserver-xorg`) and launch the engine in an X11 session. Forcing X11 via `GDK_BACKEND=x11 ./engine` may also work depending on your compositor.
+**Wayland:** Mouse locking does not function correctly under native Wayland. The simulator must be run under X11. On systems that default to Wayland, install basic X11 drivers (`xorg`, `xserver-xorg`) and launch the simulator in an X11 session. Forcing X11 via `GDK_BACKEND=x11 ./engine` may also work depending on your compositor.
 
 **Scene format:** v200 saves bodies (stable IDs, sleep, damping) plus spring and revolute joints, with CRC32 footer and atomic write. Fixed/distance/prismatic/rope constraints solve correctly but have no creation UI and do not persist yet. Files ≤v153 load via the legacy reader. Truth labels: `world.drag` is linear-viscous (not quadratic aero); `nice_value`/`angular_damping_scale` are NON-PHYSICAL settle tools (0/1.0 = truth); `sleep.enable=0` runs sleepless truth validation; boundary walls are a plastic safety net, not material contact.
+
+**FTC odometry:** encoder odometry drift exceeds 20% under wheelspin (headless test `ftc_odometry` fails); chassis-velocity integration would be more accurate but hides slip. **FTC stress:** multi-robot stress test shows chassis lean under sustained lateral load and reduced strafe displacement (headless test `ftc_stress` fails); suspension model would help.
 
 ---
 
 ## Object Types
-The engine supports three object types:
+
+The simulator supports three object types:
 - **Sphere** — spawned via `touch new.sph`, spawner menu, or `Enter`
 - **Cube** — spawned via `touch new.cube`, spawner menu, or `Enter`
 - **Cylinder** — spawned via `touch new.cyl`, spawner menu, or `Enter`; axle along local X, correct `I = ½·m·r²` inertia, exact flat-cap contacts, dedicated instanced mesh
-
-
 
 ---
 
@@ -387,7 +368,7 @@ Run:
 ./engine
 ```
 
-The engine has been tested on Ubuntu 24.04.4 LTS. Intel MacOS users may attempt to install the same dependencies via Homebrew, but this is unsupported.
+The simulator has been tested on Ubuntu 24.04.4 LTS. Intel MacOS users may attempt to install the same dependencies via Homebrew, but this is unsupported.
 
 ## Windows (MSYS2 MINGW64, supported)
 

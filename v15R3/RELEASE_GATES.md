@@ -1,9 +1,9 @@
-# MPE v15R3 Release Gates
+# MFS v15R3 Release Gates
 
 This document defines the exit criteria for tagging `v15R3`.
 
-`v15R3` is the MPE-only release of the v15 series, carrying the
-centralised configuration system (prior RCs: v15R1, v15R2).
+`v15R3` is the MFS (MPE FTC Simulator) release of the v15 series, carrying the
+centralised configuration system (prior RCs: v15R1, v15R2) and the FTC robotics layer.
 
 ---
 
@@ -29,7 +29,7 @@ They should be recorded as post-stable work items.
 
 ### 1. Release Freeze
 - [X] The `v15R3` release policy is present and acknowledged.
-- [X] No new features beyond the config system are being added.
+- [X] No new features beyond the config system + FTC robotics are being added.
 - [X] Only correctness, stability, validation, documentation, and hygiene changes are accepted.
 
 ### 2. Build
@@ -40,7 +40,7 @@ They should be recorded as post-stable work items.
 - [X] Windows (MSYS2 MINGW64) builds warning-free; `.exe` suffix and MSVCRT `%zu` portability handled.
 
 ### 3. Startup
-- [X] Engine starts using the documented workflow.
+- [X] Simulator starts using the documented workflow.
 - [X] Startup prints the correct version string (`MPE v15R3`).
 - [X] Config system initialises (prints `[config] loaded` or `[config] defaults active`).
 - [X] Shaders load successfully.
@@ -78,6 +78,7 @@ They should be recorded as post-stable work items.
 - [X] Objects rest on the floor without explosive jitter.
 - [X] Cubes stack with reasonable stability.
 - [X] Spheres and cubes collide correctly.
+- [X] Cylinders (wheels) rest on floor correctly.
 - [X] Restitution produces bounce.
 - [X] Friction affects sliding.
 - [X] Sleeping objects wake when hit.
@@ -124,13 +125,13 @@ They should be recorded as post-stable work items.
 - [X] Config reset restores v14S-identical behaviour (same truth-fix exceptions as above).
 
 ### 11. Documentation
-- [X] README matches the code.
-- [X] User guide matches the code.
+- [X] README matches the code (MFS-focused).
+- [X] User guide matches the code (MFS-focused).
 - [X] Validation checklist matches the current version.
 - [X] Broadphase description matches the implementation.
 - [X] Physics timestep description matches the implementation.
 - [X] Config system is documented.
-- [X] Known limitations are documented.
+- [X] Known limitations are documented (including FTC odometry/stress).
 
 ### 12. Repository Hygiene
 - [X] Build artifacts are not tracked.
@@ -193,17 +194,15 @@ These belong after `v15R3`.
 
 ---
 
-
-### 14. Joints and constraints
+### 14. Joints and Constraints
 - [X] Revolute joints hold anchors and allow swing (`revolute` test)
-- [X] Revolute axis drift corrected (positional Baumgarte, once per tick after the loop)
+- [X] Revolute axis drift corrected (positional Baumgarte, once per tick in pre_step)
 - [X] Revolute angle limits tracked once per tick with velocity-level enforcement
 - [X] Fixed / prismatic / distance / rope constraints solved (2-D perpendicular lock, measured limits, pull-only rope)
 - [X] Spring joints with live rendering
 - [X] Joint pre-step runs once per tick (angle/slide tracking never integrates per-iteration)
 - [X] Fixed-timestep accumulator (60Hz deterministic)
 - [X] Scene save/load preserves joint assemblies (v200: springs + revolutes, `scene_roundtrip` test)
-
 
 ---
 
@@ -229,5 +228,6 @@ plus committed `f10_long_run`), F11 robustness green in-engine and headless
 (`f11_torture`). P1 known limitations are documented in
 [`release_notes_v15R3.md`](release_notes_v15R3.md) and
 [`how_to_use.md`](how_to_use.md) (Wayland mouse-lock, joint creation UI +
-persistence scope, SIMD/multithreading). Tree frozen (`a3_release_freeze = 1`):
-correctness, stability, validation, documentation, and hygiene changes only.
+persistence scope, SIMD/multithreading, FTC odometry/stress). Tree frozen
+(`a3_release_freeze = 1`): correctness, stability, validation, documentation,
+and hygiene changes only.

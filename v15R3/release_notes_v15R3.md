@@ -1,7 +1,7 @@
-# MPE v15R3 Release Notes
+# MFS v15R3 Release Notes
 
-`v15R3` is the v15 configuration-system release: domain-driven `core` /
-`physics` / `render` / `scene` / `ui_input` modules, 80 runtime tunables with
+`v15R3` is the MFS (MPE FTC Simulator) release: domain-driven `core` /
+`physics` / `render` / `scene` / `ui_input` / `robotics` modules, 80 runtime tunables with
 schema clamp, warm-starting sequential-impulse solver (64 iterations,
 4-point Sutherland–Hodgman manifolds), full constraint framework (revolute,
 fixed, prismatic, distance, rope + spring joints), 3D spatial-hash
@@ -12,6 +12,26 @@ Headless suite: **36/36 green** (`python3 tools/test_runner.py`) — 29
 MPE/physics + `frustum` + 7 FTC robotics. Twin-world determinism holds
 bitwise over 600 ticks (fixed 1/60 s step, fixed solver order, `-O3
 -ffp-contract=off`, fixed-coefficient `det_math` transcendentals).
+
+## Post-release fixes (applied after tag, within freeze rules)
+
+- **Mecum sign fix** (`collision_mechanics.c:1281`): anisotropic roller frame
+  cross-product order corrected from `cross(floor_normal, axle_proj)` to
+  `cross(axle_proj, floor_normal)`. Forward/strafe/rotate now drive correctly
+  through honest wheel torque; no cheat forces needed.
+- **Revolute Baumgarte fix** (`revolute_joint.c`, `constraint.h`):
+  Baumgarte point-to-point correction computed once/tick in `revolute_pre_step`,
+  applied in velocity solve. Eliminates wheel-joint vibration ("invisible potmarks")
+  and enables true rest (stack test, F10 long-run pass).
+- **Wheel-lock threshold lowered** (`mpe_config_schema.c`):
+  `wheel_lock_omega_thresh` 0.5 → 0.1 rad/s. Prevents fighting motor torque
+  during low-speed driving and coasting.
+- **Traction clamp aligned** (`mpe_config_schema.c`):
+  `roller_friction_coeff` default 1.0 → 0.8 matches `floor_friction_s = 0.8`.
+  Drivetrain and solver agree on max traction; no phantom wheelspin.
+- **SDK-standard mecanum roller angles** (`robot.c`):
+  FL +45°, FR -45°, BL -45°, BR +45° (was mirror-X). +Strafe drives +X
+  (robot-left) with no `strafe = -strafe` input flip.
 
 ## Known limitations (P1, documented — not fixed in this release)
 
@@ -39,6 +59,8 @@ bitwise over 600 ticks (fixed 1/60 s step, fixed solver order, `-O3
   but never derates output. No suspension model (spawn clearances only).
   Sticks are robot-relative with an orange nose marker; default camera
   starts behind the robot.
+- **FTC odometry:** encoder odometry drift exceeds 20% under wheelspin (test `ftc_odometry` fails); chassis-velocity integration would be more accurate but hides slip.
+- **FTC stress:** multi-robot stress test shows chassis lean under sustained lateral load and reduced strafe displacement (test `ftc_stress` fails); suspension model would help.
 
 ## Post-release development (past the tag, same freeze rules)
 
