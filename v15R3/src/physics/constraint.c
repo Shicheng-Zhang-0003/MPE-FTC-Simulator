@@ -452,10 +452,15 @@ void constraint_correct_axis_drift_all (struct physics_world *world, float dt) {
         rigidbody *body_a = find_body_by_id_cached (world, bodies, body_count, c->body_id_a);
         rigidbody *body_b = find_body_by_id_cached (world, bodies, body_count, c->body_id_b);
         if ((!body_a) || (!body_b)) { continue; }
-        if ((!islands_body_awake (world, body_a)) && (!islands_body_awake (world, body_b))) { continue; }
+        /* Revolute axis drift correction must run regardless of sleep state.
+         * It corrects positional axis drift (orientation), not velocity.
+         * Sleep only affects velocity integration; orientation drift must be
+         * corrected every tick to prevent wheels from tilting like loose LEGO shafts. */
         if (c->type == constraint_revolute) {
             revolute_correct_axis_drift (&c->p.revolute, body_a, body_b, dt);
         } else if (c->type == constraint_fixed) {
+            /* Weld drift correction: skip if both asleep (no relative motion possible). */
+            if ((!islands_body_awake (world, body_a)) && (!islands_body_awake (world, body_b))) { continue; }
             /* TRUTH: weld angular drift corrected once per tick (see header). */
             fixed_correct_angular_drift (&c->p.fixed, body_a, body_b, dt);
         }

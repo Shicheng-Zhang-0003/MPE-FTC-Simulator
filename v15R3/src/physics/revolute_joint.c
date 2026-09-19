@@ -249,6 +249,18 @@ void revolute_pre_step(revolute_params *p, rigidbody *body_a, rigidbody *body_b,
         }
     }
 
+    /* ---- Initialize reference axes for axis drift correction (once, first call) ----
+     * These store the world-space hinge axes at initialization, used by
+     * revolute_correct_axis_drift to anchor the hinge to its original orientation.
+     * Done regardless of limits_enabled, so wheel joints also benefit. */
+    if (!p->angle_initialized) {
+        p->reference_axis_a = vector4_rotate_to_vector3(body_a->orientation, vector3_normalisation(p->axis_a));
+        p->reference_axis_b = vector4_rotate_to_vector3(body_b->orientation,
+            (vector3_length_squared(p->axis_b) > 1e-12f) ? vector3_normalisation(p->axis_b)
+                                                        : vector3_normalisation(p->axis_a));
+        p->angle_initialized = true;
+    }
+
     /* ---- Angle tracking for limits (unchanged) ---- */
     if (!p->limits_enabled || !p->angle_initialized) {
         return;
@@ -948,35 +960,67 @@ void revolute_correct_axis_drift(revolute_params *p, rigidbody *body_a, rigidbod
     if ((!p) || (!body_a) || (!body_b) || (dt <= 0.0f)) {
         return;
     }
-    vector3 hinge_b = (vector3_length_squared(p->axis_b) > 1e-12f) ? vector3_normalisation(p->axis_b)
-                                                                   : vector3_normalisation(p->axis_a);
-    /* ---- axis drift correction: positional Baumgarte to keep hinge axes aligned ---- */
+    /* Use reference axes (stored at init) as the target orientation for each body's hinge axis.
+     * Compare each body's CURRENT hinge axis with its REFERENCE axis (stored at init).
+     * This anchors each body's hinge axis to its original world-space direction,
+     * preventing drift even when both bodies tilt together. */
+    vector3 ref_axis_a = p->reference_axis_a;
+    vector3 ref_axis_b = p->reference_axis_b;
+    /* Fallback to current orientation if reference axes not initialized (shouldn't happen). */
+    if (vector3_length_squared(ref_axis_a) < 1e-12f) {
+        ref_axis_a = vector4_rotate_to_vector3(body_a->orientation, vector3_normalisation(p->axis_a));
+    }
+    if (vector3_length_squared(ref_axis_b) < 1e-12f) {
+        vector3 hinge_b = (vector3_length_squared(p->axis_b) > 1e-12f) ? vector3_normalisation(p->axis_b)
+                                                                       : vector3_normalisation(p->axis_a);
+        ref_axis_b = vector4_rotate_to_vector3(body_b->orientation, hinge_b);
+    }
+    /* Current hinge axes in world space */
     vector3 axis_a_world = vector4_rotate_to_vector3(body_a->orientation, vector3_normalisation(p->axis_a));
-    vector3 axis_b_world = vector4_rotate_to_vector3(body_b->orientation, hinge_b);
-    /* Axis error: cross product gives rotation vector needed to align axis_b with axis_a.
-     * Magnitude is sin(angle) ≈ angle for small angles. Direction is the rotation axis. */
-    vector3 axis_error = vector3_cross(axis_a_world, axis_b_world);
-    float axis_error_len_sq = vector3_length_squared(axis_error);
-    if (axis_error_len_sq > 0.000001f) {
-        /* Baumgarte stabilization: apply angular velocity correction proportional to axis_error */
-        const float axis_baumgarte_beta = 0.1f; /* MFS_127: reduced from 0.2 to reduce oscillation */
-        vector3 axis_correction = vector3_scaling(axis_error, axis_baumgarte_beta / dt);
-        /* Compute effective angular mass for the correction */
-        math3 drift_angular_mass = math3_addition(rigidbody_effective_inv_inertia(body_a),
-                                                  rigidbody_effective_inv_inertia(body_b));
-        math3 drift_angular_mass_inv = math3_inverse(drift_angular_mass);
-        vector3 axis_impulse =
-            vector3_scaling(math3_multiplication_vector3(drift_angular_mass_inv, axis_correction), -1.0f);
-        /* Apply angular impulse to both bodies */
+    vector3 axis_b_world = vector4_rotate_to_vector3(body_b->orientation,
+        (vector3_length_squared(p->axis_b) > 1e-12f) ? vector3_normalisation(p->axis_b)
+                                                     : vector3_normalisation(p->axis_a));
+    /* Axis error: cross product of current axis with reference axis.
+     * This gives the rotation vector needed to align current axis with reference axis. */
+    vector3 axis_error_a = vector3_cross(axis_a_world, ref_axis_a);
+    vector3 axis_error_b = vector3_cross(axis_b_world, ref_axis_b);
+    float axis_error_len_sq_a = vector3_length_squared(axis_error_a);
+    float axis_error_len_sq_b = vector3_length_squared(axis_error_b);
+    const float axis_baumgarte_beta = 0.1f; /* MFS_127: reduced from 0.2 to reduce oscillation */
+    const float axis_correction_scale = axis_baumgarte_beta / dt;
+    math3 drift_angular_mass = math3_addition(rigidbody_effective_inv_inertia(body_a),
+                                              rigidbody_effective_inv_inertia(body_b));
+    math3 drift_angular_mass_inv = math3_inverse(drift_angular_mass);
+    /* Correct body A's axis drift */
+    if (axis_error_len_sq_a > 0.000001f) {
+        vector3 axis_correction_a = vector3_scaling(axis_error_a, axis_correction_scale);
+        vector3 axis_impulse_a =
+            vector3_scaling(math3_multiplication_vector3(drift_angular_mass_inv, axis_correction_a), -1.0f);
         if (!body_a->static_state) {
             body_a->angular_velocity = vector3_subtraction(
                 body_a->angular_velocity,
-                math3_multiplication_vector3(rigidbody_effective_inv_inertia(body_a), axis_impulse));
+                math3_multiplication_vector3(rigidbody_effective_inv_inertia(body_a), axis_impulse_a));
         }
         if (!body_b->static_state) {
             body_b->angular_velocity = vector3_addition(
                 body_b->angular_velocity,
-                math3_multiplication_vector3(rigidbody_effective_inv_inertia(body_b), axis_impulse));
+                math3_multiplication_vector3(rigidbody_effective_inv_inertia(body_b), axis_impulse_a));
+        }
+    }
+    /* Correct body B's axis drift */
+    if (axis_error_len_sq_b > 0.000001f) {
+        vector3 axis_correction_b = vector3_scaling(axis_error_b, axis_correction_scale);
+        vector3 axis_impulse_b =
+            vector3_scaling(math3_multiplication_vector3(drift_angular_mass_inv, axis_correction_b), -1.0f);
+        if (!body_a->static_state) {
+            body_a->angular_velocity = vector3_subtraction(
+                body_a->angular_velocity,
+                math3_multiplication_vector3(rigidbody_effective_inv_inertia(body_a), axis_impulse_b));
+        }
+        if (!body_b->static_state) {
+            body_b->angular_velocity = vector3_addition(
+                body_b->angular_velocity,
+                math3_multiplication_vector3(rigidbody_effective_inv_inertia(body_b), axis_impulse_b));
         }
     }
 }
