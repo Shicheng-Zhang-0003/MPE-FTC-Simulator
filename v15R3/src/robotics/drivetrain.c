@@ -191,8 +191,7 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
                  * horizontal chassis damping when all wheel commands are ~0 and the robot
                  * is nearly stopped. The <0.25 m/s gate leaves normal high-speed coast-down
                  * to back-EMF + rolling resistance. */
-                {
-                    int mfs_idle = 1;
+                                    int mfs_idle = 1;
                     for (int mfs_wi = 0; mfs_wi < robot->wheel_count; mfs_wi++) {
                         if (fabsf(robot->wheel_motors[mfs_wi].command) > 0.05f) { mfs_idle = 0; break; }
                     }
@@ -228,7 +227,37 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
                             }
                         }
                     }
-                }
+
+
+
+/* MFS_ROLL_DAMP: roll/pitch damping during active driving.
+ * Strafe lateral forces at ground level create a roll moment that tilts
+ * the chassis, which tilts the wheels and breaks the mecanum friction frame.
+ * Real robots have frame stiffness + suspension that resist this; our
+ * rigid chassis has neither. Add small roll/pitch damping torque opposing
+ * angular velocity about X (roll) and Z (pitch) axes when actively driving.
+ * Only active when NOT idle (any wheel commanded), so coast-down remains
+ * honest. Damping coefficient tuned to prevent tilt without overdamping. */
+if (!mfs_idle) {
+    int mfs_cidx = robot->chassis_body;
+    if ((mfs_cidx >= 0) && (mfs_cidx < world->body_count)) {
+        rigidbody *mfs_chassis = &world->bodies[mfs_cidx];
+        /* Roll/pitch damping torque: -k * omega, with k tuned for ~0.5s time constant */
+        const float mfs_roll_damp = 0.5f; /* Nm/(rad/s) - roll axis (X) */
+        const float mfs_pitch_damp = 0.5f; /* Nm/(rad/s) - pitch axis (Z) */
+        mfs_chassis->torque_accumulator.x -= mfs_chassis->angular_velocity.x * mfs_roll_damp;
+        mfs_chassis->torque_accumulator.z -= mfs_chassis->angular_velocity.z * mfs_pitch_damp;
+        /* Roll stiffness: restoring torque proportional to roll angle.
+         * Prevents sustained tilt from lateral forces during strafe.
+         * Roll angle extracted from quaternion: roll = atan2(2*(w*x + y*z), 1 - 2*(x*x + y*y)) */
+        float qw = mfs_chassis->orientation.w;
+        float qx = mfs_chassis->orientation.x;
+        float qy = mfs_chassis->orientation.y;
+        float qz = mfs_chassis->orientation.z;
+        float mfs_roll_angle = atan2f(2.0f * (qw * qx + qy * qz), 1.0f - 2.0f * (qx * qx + qy * qy));
+        mfs_chassis->torque_accumulator.x -= mfs_roll_angle * 5.0f; /* Nm/rad stiffness */
+    }
+}
 
 /* FIX-AUDIT: hard velocity clamp restored. While non-physical, the contact
  * solver's friction alone cannot prevent runaway acceleration from mecanum
