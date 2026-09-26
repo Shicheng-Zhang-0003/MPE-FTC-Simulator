@@ -10,7 +10,7 @@ v15S/src/ecosystem/mfs/                  # MFS root ("mfs-simulator")
   README_MFS.md                          # this file
   Makefile                               # unified standalone build (thin .so, build/ objs)
   mfs_sources.mk                         # canonical engine+FTC file lists (mirrored in build_tests.sh)
-  build_tests.sh                         # FTC/robotics test build + run (8 gated + 5 info)
+  build_tests.sh                         # FTC/robotics test build + run (11 gated + 5 info)
   mfs_ecosystem.c                        # overarching descriptor: registers
                                          #   modules/module_1 + modules/ftc
   mfs_internal.c/.h                      # internal static module registry
@@ -88,11 +88,11 @@ Design rules modules follow (and future modules should too):
 From `v15S/src`:
 
 ```
-ecosystem/mfs/build_tests.sh            # full FTC suite (8 gated tests + 5 info diags + build checks)
+ecosystem/mfs/build_tests.sh            # full FTC suite (11 gated tests + 5 info diags + build checks)
 ecosystem/mfs/build_tests.sh --build-only
 ```
 
-Binaries and logs go to `/tmp/ftc_tests` (override with `OUTDIR=...`).
+Binaries and logs go to `../../temp/ftc_tests` by default (override with `OUTDIR=...`).
 The script also stages `mpe_ftc.so` at `src/plugins/` — the kernel loader
 only accepts `plugins/<name>.so` under its working directory, so that copy
 is what `mod load` and the hotload test use (same binary as
@@ -153,13 +153,14 @@ physics_world_detach_module(world, "ftc-fleet");
 - Traction control (`wheel_traction_scale`): cuts torque only on
   overspeed (burnout); under-speed keeps full torque so wheels spin up
   to rolling speed instead of skidding.
-- Mecanum strafe is a torque-derived roller force on the chassis
-  (`sin45·Στ/r` from instantaneous motor torques), capped at 1.1× the
-  static cone as a documented breakaway margin: the isotropic contact
-  model cannot roll sideways, so the stand-in must exceed static where
-  real rollers would roll. `odom_slip` flags every fused tick; encoder
-  math itself is exact. Anisotropic roller friction in the solver remains
-  the principled long-term model.
+- Mecanum strafe is EMERGENT from real roller contacts (FIX-AUDIT-DESPOT:
+  this replaces the retired chassis-force era — no more `sin45·Στ/r`
+  roller force on the chassis, no 1.1× static-cone breakaway margin, no
+  `odom_slip` fusion ticks). Each wheel carries 8 real roller bodies on
+  free revolute bearings (see `robot.c` geometry rationale); lateral thrust
+  falls out of rigid-body dynamics + Coulomb friction, bounded by the
+  friction cone for free. Odometry is therefore pure encoder kinematics
+  and `odom_slip` stays 0 (retained in the struct for ABI only).
 - Motor model: implicit-in-speed solve with disturbance observer
   (stall *and* free speed both exact), free-speed governor backstop,
   copper thermal derating, 20 A PTC fuse with brownout recovery.
@@ -185,7 +186,6 @@ physics_world_detach_module(world, "ftc-fleet");
   at 1.1× free speed) and the implicit motor solve (no discrete-time
   overshoot). Unbounded torque can no longer pump wheels to span-busting
   speeds through the FTC paths.
-- Odometry tracks physics within ~5% on tile floors (was 45% error with
-  sign flip on the frictionless backstop). Lateral encoder blindness is
-  structural (roller thrust bypasses wheels): `odom_slip` flags fused
-  ticks instead of hiding them.
+- Odometry is pure encoder forward kinematics (no chassis fusion), so any
+  encoder-vs-truth disagreement is real slip and is reported as error
+  rather than papered over. `odom_slip` is always 0, retained for ABI.
