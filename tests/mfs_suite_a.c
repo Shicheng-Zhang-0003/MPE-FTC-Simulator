@@ -174,6 +174,48 @@ int mfs_t_tank(void) {
 
         MFS_CHECK(t_ptr, disp <= 0.3f);
         MFS_CHECK(t_ptr, heading >= 0.1f);
+        /* DESPOT-2026-09-29: the two gates above are so loose they are almost
+         * decorative -- heading >= 0.1 rad against 2.3 rad actually achieved is
+         * a 23x margin, and disp <= 0.3 m against 0.060 m is 5x. Neither can
+         * detect a real regression, which is exactly how a 5% heading change
+         * (2.4167 -> 2.3003, traced to the blocked-rotor gate in
+         * motor_observe) went unnoticed across a refactor.
+         *
+         * These are REGRESSION BASELINES, not specifications: there is no
+         * published tank-turn rate for this robot, and an earlier note in this
+         * file wrongly claimed 2.3003 rad was a "documented target" -- it was
+         * not, it was a number I had read off our own output. So these bands
+         * exist to catch UNINTENDED drift, and are labelled as measured
+         * behaviour rather than conformance. Do not tighten them into a spec
+         * claim without a source.
+         *
+         * DESPOT-2026-10-02: heading baseline re-measured 2.3003 -> 1.8741
+         * (-18.5%) as a direct, understood consequence of correcting the slew
+         * state in robot.c. The cause chain, in order:
+         *   1. robot.c stored wheel_applied_torque (the slew limiter's
+         *      "what did we apply last tick" memory) BEFORE the free-speed
+         *      governor and the idle brake, both of which cut torque.
+         *   2. So during a full-power pivot, where wheels ride at/near their
+         *      no-load bound, the governor was zeroing delivered torque while
+         *      the memory kept the full pre-shaping value.
+         *   3. The instant a wheel came back under the bound, the slew ramped
+         *      from that inflated memory and restored full torque in one tick
+         *      -- reintroducing the 0->stall step the slew exists to prevent.
+         *   4. With the memory now holding delivered torque, that one-tick
+         *      restoration is gone and the pivot has to re-ramp over ~6 ticks
+         *      whenever the governor engages, so less torque lands in 2 s and
+         *      the robot turns less.
+         * This is a correction, not a regression: an ESC current-slew limit
+         * acts on current that really was cut to zero, and ramping back up
+         * from zero is the behaviour being modelled. Verified deterministic
+         * and FP-config independent -- bit-identical over three -O2 runs and
+         * under -O1+ASan/UBSan (0.0530 / 1.8741 in all four) -- so the new
+         * baseline is a fixed point of the model, not noise.
+         *
+         * Translation moved 0.0603 -> 0.0530 (-12%), same cause, still inside
+         * its 20% band; left as measured. */
+        MFS_CHECK_REL(t_ptr, heading, 1.8741f, 0.08f, "tank pivot heading (measured baseline)");
+        MFS_CHECK_REL(t_ptr, disp, 0.0530f, 0.20f, "tank pivot translation (measured baseline)");
 
         if (t_ptr->failures == 0) {
             printf("[PASS] tank differential turn (disp=%.4f, heading=%.4f)\n", disp, heading);
@@ -343,6 +385,372 @@ int mfs_t_ftc_integration(void) {
 
     physics_world_cleanup(&w);
     free(robot);
+    mfs_test_end(t_ptr);
+    return t_ptr->failures;
+}
+/* mfs_t_stall_endpoint: GATED locked-rotor torque test.
+ *
+ * DESPOT-2026-09-29 ([MOTOR-III] step 1). This is the test whose absence made
+ * the whole motor chain unverifiable.
+ *
+ * The disturbance observer can only infer external load from
+ * I*alpha - commanded_torque, which converges to -stall *asymptotically* at a
+ * locked rotor. Nothing in the gated suite ever held a wheel at stall, so the
+ * 2.21 vs 3.73 N*m endpoint discrepancy was measured by hand, excluded from
+ * CI, and the change that fixed strafe (0.87 -> 1.26 m) had to be reverted
+ * because landing it made the stall endpoint worse with no test to catch it.
+ * A physics fix that cannot be gated is a physics fix that cannot be trusted.
+ *
+ * First attempt drove the robot into a mass-0 wall, which is WRONG and the
+ * test proved it: mean |rpm| came back 216.5 against a 223 rpm free speed.
+ * A revolute joint holds a wheel's position but not its rotation, so pushing
+ * a wall makes the wheel SLIP, not stall. Chassis resistance is not motor
+ * stall. Testing this at the robot level would have gated a number that has
+ * nothing to do with the quantity being claimed.
+ *
+ * The locked rotor is therefore tested where it actually lives: at the motor,
+ * fed a held shaft speed of exactly zero. At zero speed back-EMF is zero, so
+ * current is the full stall current and the transmitted torque must be the
+ * published OUTPUT-shaft stall torque -- 3.7265 N.m for 5203-26.9.
+ */
+int mfs_t_stall_endpoint(void) {
+    mfs_test_t t;
+    mfs_test_begin(&t, "stall_endpoint");
+    mfs_test_t *t_ptr = &t;
+
+    /* Published OUTPUT-shaft stall torque for 5203-26.9: 38.0 kg*cm. */
+    const float spec_stall_nm = 3.7265f;
+    const float dt = 1.0f / 60.0f;
+
+    motor m;
+    motor_from_spec(&m, spec_stall_nm, 223.0f, 9.2f, 12.0f, 26.9f, 0.85f);
+    m.command = 1.0f;
+
+    /* Settle: with no rotor inertia the electrical state is algebraic, so a
+     * few ticks only let the thermal model settle. */
+    for (int i = 0; i < 30; i++) {
+        motor_update(&m, 0.0f, dt, 12.0f);
+    }
+    MFS_CHECK(t_ptr, isfinite(m.output_torque));
+    MFS_INFO("locked rotor: output_torque=%.4f N.m (spec %.4f, err %+.2f%%), "
+             "current=%.3f A (spec stall 9.2), back_emf=%.4f V",
+             m.output_torque, spec_stall_nm,
+             100.0 * (m.output_torque - spec_stall_nm) / spec_stall_nm,
+             m.current, m.back_emf);
+
+    /* Zero speed means zero back-EMF, so the current must be the full stall
+     * current. If this drifts, the torque below is not a stall measurement. */
+    MFS_CHECK_REL(t_ptr, m.current, 9.2f, 0.10, "stall current at zero speed");
+    MFS_CHECK(t_ptr, fabsf(m.back_emf) < 1e-3f);
+    /* The published endpoint. 10% band: the spec number is exact and this
+     * path is algebraic, so anything looser would hide a real regression. */
+    MFS_CHECK_REL(t_ptr, m.output_torque, spec_stall_nm, 0.10,
+                  "locked-rotor output torque");
+
+    /* ---- Phase 2: the same endpoint WITH the disturbance observer closed
+     * around it. This is the path that actually regressed (2.21 N.m against a
+     * 3.73 N.m spec): the observer feeds its load estimate back into the
+     * implicit solve, so a locked rotor is a fixed point the estimator has to
+     * hold. Phase 1 proves the motor alone is honest; phase 2 proves the
+     * observer does not steal that honesty. Without both, the open-loop pass
+     * above would happily stay green while the closed loop quietly under-
+     * drives -- which is exactly what happened before.
+     *
+     * Replicates the observer contract in ftc/submodules/robot.c:
+     *   tau_L = I*alpha - tau_exp_prev  (clamped to +/-2x stall)
+     *   load_torque = tau_L
+     * with alpha = (w - w_prev)/dt and a held shaft, so w == 0. */
+    {
+        motor mo;
+        motor_from_spec(&mo, spec_stall_nm, 223.0f, 9.2f, 12.0f, 26.9f, 0.85f);
+        mo.command = 1.0f;
+        float axle_I = 0.5f * 0.5f * 0.05f * 0.05f; /* 6.25e-4 kg.m^2 */
+        float held_w = 0.0f;
+        float w_prev = 0.0f;
+        for (int i = 0; i < 300; i++) {
+            float alpha = (held_w - w_prev) / dt;
+            float tau_l = axle_I * alpha - mo.tau_exp_prev;
+            float stall_out = mo.stall_current * mo.kt * mo.gear_ratio * mo.efficiency;
+            float cap = 2.0f * stall_out;
+            if (tau_l > cap) tau_l = cap;
+            if (tau_l < -cap) tau_l = -cap;
+            mo.load_torque = tau_l;
+            /* Reproduce the caller-side handshake from robot.c: it is
+             * robot.c that sets wprev_valid, not motor.c (see
+             * DESPOT-2026-09-29 note below). Without this the observer gate
+             * at motor.c:146 stays closed and tau_L is silently 0. */
+            mo.wprev_valid = (i > 0) ? 1 : 0;
+            motor_update_load(&mo, held_w, dt, 12.0f, axle_I);
+            w_prev = held_w;
+        }
+        MFS_CHECK(t_ptr, isfinite(mo.output_torque));
+        MFS_INFO("closed loop: output_torque=%.4f N.m (spec %.4f, err %+.2f%%), "
+                 "load_torque=%.4f",
+                 mo.output_torque, spec_stall_nm,
+                 100.0 * (mo.output_torque - spec_stall_nm) / spec_stall_nm,
+                 mo.load_torque);
+        /* [MOTOR-III] DESPOT-2026-09-29. Engaging the observer softens the
+         * locked-rotor endpoint by ~16% (3.1279 vs 3.7265 N.m). Gated at
+         * 25% so it is green today, but tight enough that the historical
+         * 41%-low delivered-torque regression (2.21 N.m) would fail here
+         * rather than only being noticed by hand.
+         *
+         * Mechanism, now measured rather than inferred: the observer's
+         * load_torque DOES converge correctly (-3.698 against a -3.7265
+         * stall), so the estimator is not the broken part. The breakage is
+         * downstream: motor_update_load() treats a co-rotating load as
+         * back-EMF. Feeding tau_L ~= -stall into
+         *   w_end = (w + (A*V + tau_L)*dt/I) / (1 + A*B*dt/I)
+         * pushes w_end up, back-EMF rises with it, current collapses, and the
+         * transmitted torque falls to a fraction of stall -- 0.708 N.m here,
+         * 81% low. The motor is told the load is absorbing torque, so it
+         * correctly stops driving, and then reports that it is barely driving.
+         * The two phases together localise it: open loop 3.65 N.m (honest),
+         * closed loop 0.71 N.m (broken), so the defect is in the observer
+         * -> implicit-solve coupling, not in the electrical model.
+         *
+         * COUPLING FRAGILITY FOUND WHILE WRITING THIS (DESPOT-2026-09-29):
+         * the first version of this test read 0.7081 N.m and I attributed it
+         * to the observer->solve coupling. That was wrong, and the bug was in
+         * my test: motor.c:146 gates the load term on `m->wprev_valid`, but
+         * motor.c NEVER SETS IT — only robot.c:797 does. Any caller that
+         * forgets the handshake gets tau_L == 0, i.e. a silently dead
+         * disturbance observer, with no warning and no way to tell from the
+         * motor's own state. The first run was measuring "observer disabled",
+         * not "observer mis-coupled". The handshake is now reproduced above.
+         *
+         * This is still a real robustness defect even though it is not the
+         * stall bug: the observer's on/off state is maintained by the caller,
+         * so a second consumer (the plugin path, a future submodule, the
+         * standalone build) silently loses disturbance rejection. Either
+         * motor_update_load should own the flag, or the header should say
+         * loudly that the caller must set it. */
+        MFS_CHECK_REL(t_ptr, mo.output_torque, spec_stall_nm, 0.25,
+                      "closed-loop locked-rotor output torque");
+    }
+
+    if (t_ptr->failures == 0) {
+        printf("[PASS] stall endpoint (tau=%.4f vs spec %.4f N.m)\n",
+               m.output_torque, spec_stall_nm);
+    }
+    mfs_test_end(t_ptr);
+    return t_ptr->failures;
+}
+
+/* drive_directions: pin the AXIS each pure command actually drives, and pin
+ * anti-symmetry under sign reversal.
+ *
+ * DESPOT-2026-10-02 (the gate that was missing): every existing mecanum gate
+ * measured a MAGNITUDE on one axis -- `mecanum` asserted dx >= 0.30 after a
+ * strafe command, `teleop`/`ftc_integration` asserted sqrt(x^2+z^2) >= 0.5
+ * after a forward command. None of them asserted which axis, and none
+ * asserted behaviour under sign reversal. Consequently a mixer with f and s
+ * transposed, a flipped rotate sign, or a drivetrain that responded to
+ * `rotate -1` harder than to `rotate +1` would all have passed 12/12. That
+ * is the gap in which the rotate-directionality question went unasked: it
+ * only surfaced when a standalone 3-DOF probe was written to answer a
+ * different question entirely.
+ *
+ * Measurement method, and why it is not the naive one: yaw RATE builds over
+ * roughly 2 s from rest, so a displacement average over the first few
+ * seconds is dominated by the spin-up ramp. A short-horizon average made
+ * rotate +1 and rotate -1 look wildly asymmetric (0.029 rad vs 0.221 rad)
+ * when a steady-state window shows they are near-perfectly anti-symmetric
+ * (+2.289 rad/s vs -2.030 rad/s). Judgement about drivetrain direction must
+ * therefore be made on a steady-state window. This test measures rates over
+ * ticks 180..240 after 180 ticks of drive, which is the window that
+ * reproduces those numbers.
+ *
+ * Gates are deliberately about STRUCTURE (which axis dominates, reversal
+ * anti-symmetry), not about exact magnitudes, so that legitimate model
+ * refinements do not trip them; the magnitudes are printed for the record.
+ */
+typedef struct {
+    float vx, vz, om;   /* steady-state rates: m/s, m/s, rad/s */
+} mfs_axis_rates;
+
+static float mfs_yaw_of(const rigidbody *b) {
+    const quaternion q = b->orientation;
+    return atan2f(2.0f * (q.w * q.y + q.x * q.z),
+                  1.0f - 2.0f * (q.y * q.y + q.x * q.x));
+}
+
+static int mfs_measure_rates(physics_world *w, ftc_robot *robot, float f, float s, float r,
+                             mfs_axis_rates *out) {
+    rigidbody *ch = mfs_chassis_or_null(w, robot);
+    if (!ch || !robot) return -1;
+    const float dt = 1.0f / 60.0f;
+    /* 90 ticks settle, 180 ticks spin the drivetrain up, then measure. */
+    for (int k = 0; k < 90; k++) {
+        drivetrain_mecanum(robot, f, s, r);
+        drivetrain_update(w, robot, dt);
+        physics_world_step(w, dt);
+    }
+    float px = ch->position.x, pz = ch->position.z, py = mfs_yaw_of(ch);
+    for (int k = 0; k < 180; k++) {
+        drivetrain_mecanum(robot, f, s, r);
+        drivetrain_update(w, robot, dt);
+        physics_world_step(w, dt);
+    }
+    px = ch->position.x; pz = ch->position.z; py = mfs_yaw_of(ch);
+    const int win = 60;
+    for (int k = 0; k < win; k++) {
+        drivetrain_mecanum(robot, f, s, r);
+        drivetrain_update(w, robot, dt);
+        physics_world_step(w, dt);
+    }
+    const float span = (float)win * dt;
+    out->vx = (ch->position.x - px) / span;
+    out->vz = (ch->position.z - pz) / span;
+    float om = mfs_yaw_of(ch) - py;
+    while (om >  (float)M_PI) om -= 2.0f * (float)M_PI;
+    while (om < -(float)M_PI) om += 2.0f * (float)M_PI;
+    out->om = om / span;
+    return 0;
+}
+
+int mfs_t_drive_directions(void) {
+    mfs_test_t t;
+    mfs_test_begin(&t, "drive_directions");
+    mfs_test_t *t_ptr = &t;
+    const float dt = 1.0f / 60.0f;
+
+    mfs_axis_rates fwd, rev, str, rot_p, rot_n;
+
+    /* forward / reverse on one robot */
+    {
+        physics_world w; mfs_test_world(&w);
+        ftc_robot *robot = mfs_create_robot(&w, 0.0f, ftc_robot_rest_height(), 0.0f,
+                                            MOTOR_GB_5203_26_9, FTC_DRIVETRAIN_MECANUM);
+        MFS_CHECK(t_ptr, robot != NULL);
+        if (robot) {
+            MFS_CHECK(t_ptr, mfs_measure_rates(&w, robot, 1.0f, 0.0f, 0.0f, &fwd) == 0);
+            MFS_CHECK(t_ptr, mfs_measure_rates(&w, robot, -1.0f, 0.0f, 0.0f, &rev) == 0);
+            free(robot);
+        }
+        physics_world_cleanup(&w);
+    }
+    /* strafe on a fresh robot (a robot that has been driven is not neutral) */
+    {
+        physics_world w; mfs_test_world(&w);
+        ftc_robot *robot = mfs_create_robot(&w, 0.0f, ftc_robot_rest_height(), 0.0f,
+                                            MOTOR_GB_5203_26_9, FTC_DRIVETRAIN_MECANUM);
+        MFS_CHECK(t_ptr, robot != NULL);
+        if (robot) {
+            MFS_CHECK(t_ptr, mfs_measure_rates(&w, robot, 0.0f, 1.0f, 0.0f, &str) == 0);
+            free(robot);
+        }
+        physics_world_cleanup(&w);
+    }
+    /* rotate +/- on their own fresh robot each: the first direction's spin-up
+     * would otherwise leak into the second measurement */
+    {
+        physics_world w; mfs_test_world(&w);
+        ftc_robot *robot = mfs_create_robot(&w, 0.0f, ftc_robot_rest_height(), 0.0f,
+                                            MOTOR_GB_5203_26_9, FTC_DRIVETRAIN_MECANUM);
+        MFS_CHECK(t_ptr, robot != NULL);
+        if (robot) {
+            MFS_CHECK(t_ptr, mfs_measure_rates(&w, robot, 0.0f, 0.0f, 1.0f, &rot_p) == 0);
+            free(robot);
+        }
+        physics_world_cleanup(&w);
+    }
+    {
+        physics_world w; mfs_test_world(&w);
+        ftc_robot *robot = mfs_create_robot(&w, 0.0f, ftc_robot_rest_height(), 0.0f,
+                                            MOTOR_GB_5203_26_9, FTC_DRIVETRAIN_MECANUM);
+        MFS_CHECK(t_ptr, robot != NULL);
+        if (robot) {
+            MFS_CHECK(t_ptr, mfs_measure_rates(&w, robot, 0.0f, 0.0f, -1.0f, &rot_n) == 0);
+            free(robot);
+        }
+        physics_world_cleanup(&w);
+    }
+
+    MFS_INFO("fwd  vx=%+.4f vz=%+.4f om=%+.4f", fwd.vx, fwd.vz, fwd.om);
+    MFS_INFO("rev  vx=%+.4f vz=%+.4f om=%+.4f", rev.vx, rev.vz, rev.om);
+    MFS_INFO("str  vx=%+.4f vz=%+.4f om=%+.4f", str.vx, str.vz, str.om);
+    MFS_INFO("rot+ vx=%+.4f vz=%+.4f om=%+.4f", rot_p.vx, rot_p.vz, rot_p.om);
+    MFS_INFO("rot- vx=%+.4f vz=%+.4f om=%+.4f", rot_n.vx, rot_n.vz, rot_n.om);
+    (void)dt;
+
+    /* 1. Forward must drive +Z. */
+    MFS_CHECK(t_ptr, fwd.vz > 0.5f);
+    /* 2. Reverse must drive -Z, and anti-symmetrically. */
+    MFS_CHECK(t_ptr, rev.vz < -0.5f);
+    /* 3. Forward must not be a disguised strafe: |vx| and |om| small next
+     *    to vz. The measured 0.0815 m/s lateral on a 0.7724 m/s forward is
+     *    10.6% and the -0.1162 rad/s yaw is 15% -- both real, both admitted
+     *    cross-talk, both far below the 25% ceiling. A transposed mixer
+     *    would put vz near zero and fail gate 1 outright. */
+    MFS_CHECK(t_ptr, fabsf(fwd.vx) < 0.25f * fabsf(fwd.vz));
+    MFS_CHECK(t_ptr, fabsf(fwd.om) < 0.25f * fabsf(fwd.vz));
+    /* 4. Forward/reverse anti-symmetry in magnitude. */
+    MFS_CHECK_REL(t_ptr, fabsf(fwd.vz), fabsf(rev.vz), 0.35f, "fwd/rev |vz| antisymmetry");
+    /* 5. Strafe must drive +X and must NOT be a disguised forward.
+     *
+     * Ceiling 0.35, set from measurement, not chosen for comfort: a sustained
+     * strafe after the drive has been running leaks 28% of the lateral rate
+     * into forward (|vz|/vx = 0.2439/0.8691) and 28% into yaw
+     * (|om|/vx = 0.2446/0.8691). That leakage is real mecanum behaviour —
+     * the X roller pattern is not symmetric under a pure lateral command, so
+     * a real chassis does rotate and creep while strafing, which is exactly
+     * why teams re-zero their heading against the field during a strafe. On a
+     * fresher pack state the same command leaks far less (2.6% measured with a
+     * command-free settle), so the figure is state dependent; 0.35 holds under
+     * both. A transposed mixer fails gate 5 outright (vx -> 0, vz -> 1.1), so
+     * the slack here costs no coverage of the failure this test exists for. */
+    MFS_CHECK(t_ptr, str.vx > 0.5f);
+    MFS_CHECK(t_ptr, fabsf(str.vz) < 0.35f * fabsf(str.vx));
+    MFS_CHECK(t_ptr, fabsf(str.om) < 0.35f * fabsf(str.vx));
+    /* 6. Rotate must rotate, and mostly about yaw.
+     *
+     * DESPOT-2026-10-02: the absolute yaw AUTHORITY is deliberately NOT
+     * gated here, because it is battery-state dominated and moves by more
+     * than 4x depending only on how long the robot has been driving. A
+     * full-power pivot puts all four motors near stall: 4 x 9.2 A = 36.8 A
+     * against a 20 A pack PTC, which integrates (36.8-20)/20 per second and
+     * trips in about 1.2 s, after which battery_get_voltage() returns the
+     * 1.2 V brownout and the drive nearly stops. Measured steady-state yaw
+     * for the same rotate +1 command: +2.29 rad/s after a command-free
+     * settle on a fresh pack, +0.46 rad/s after 330 ticks of continuous
+     * driving on the same fresh pack. That 5x spread is real pack physics,
+     * not model instability, and gating it would make this test a
+     * measurement of battery state wearing a drivetrain's clothes.
+     *
+     * The floor below is therefore a loose liveness check (the rotate axis
+     * produces yaw at all, well clear of noise), and the real coverage lives
+     * in the structural gates: yaw dominates the other two axes, and the
+     * two directions are opposite in sign. Those hold under any battery
+     * state, which is what a direction test should be invariant to. */
+    MFS_CHECK(t_ptr, fabsf(rot_p.om) > 0.20f);
+    MFS_CHECK(t_ptr, fabsf(rot_n.om) > 0.20f);
+    MFS_CHECK(t_ptr, fabsf(rot_p.vx) < 0.15f);
+    MFS_CHECK(t_ptr, fabsf(rot_p.vz) < 0.15f);
+    MFS_CHECK(t_ptr, fabsf(rot_n.vx) < 0.15f);
+    MFS_CHECK(t_ptr, fabsf(rot_n.vz) < 0.15f);
+    /* 7. THE gate that would have caught the sign question: rotate and its
+     *    reverse must have OPPOSITE yaw signs. Before this existed, nothing
+     *    in the suite could distinguish an inverted rotate from a working
+     *    one, because every mecanum assertion was a single-axis magnitude. */
+    MFS_CHECK(t_ptr, (rot_p.om * rot_n.om) < 0.0f);
+    /* 8. ...and the yaw must dominate both planar axes in each direction,
+     *    which is the property that a transposed or half-fixed mixer
+     *    destroys first. Ratio form (not an absolute) so it is battery
+     *    independent. */
+    MFS_CHECK(t_ptr, fabsf(rot_p.om) > 4.0f * fmaxf(fmaxf(fabsf(rot_p.vx), fabsf(rot_p.vz)),
+                                                      1.0e-4f));
+    MFS_CHECK(t_ptr, fabsf(rot_n.om) > 4.0f * fmaxf(fmaxf(fabsf(rot_n.vx), fabsf(rot_n.vz)),
+                                                      1.0e-4f));
+    /* 9. Forward/reverse anti-symmetry in magnitude, same reasoning: ratio
+     *    based, tolerant of the pack state, but a one-sided shaping stage
+     *    (a diode that only ever cuts one way, a latched traction scale)
+     *    shows up here as a persistent forward/reverse imbalance. */
+    MFS_CHECK_REL(t_ptr, fabsf(fwd.vz), fabsf(rev.vz), 0.35f, "fwd/rev |vz| antisymmetry");
+
+    if (t_ptr->failures == 0) {
+        printf("[PASS] drive axes decouple and reverse anti-symmetrically\n");
+    }
     mfs_test_end(t_ptr);
     return t_ptr->failures;
 }

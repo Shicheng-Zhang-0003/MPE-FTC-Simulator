@@ -96,7 +96,13 @@ int mfs_t_bounce(void) {
     }
     if (!bounced) { physics_world_cleanup(&w); return 1; }
     float h0 = 5.0f; float e = 0.6f; float r = 0.5f;
-    float h_bounce = e*e*(h0 - 0.5f) + 0.5f;
+    /* DESPOT-2026-10-02: the bounce formula was written with bare 0.5f
+     * literals on both sides while `r` sat beside it unused (the compiler
+     * said so: -Wunused-variable). Numerically identical, since r was 0.5f,
+     * but it spelled the physics as two magic numbers in a file whose whole
+     * point is that the expectation is derived, not typed in. Now written
+     * as the documented e^2*(h-r)+r with the symbols it is derived from. */
+    float h_bounce = e*e*(h0 - r) + r;
     float err = fabsf(max_y - h_bounce) / h_bounce;
     if (err > 0.3f) { physics_world_cleanup(&w); return 1; }
     physics_world_cleanup(&w);
