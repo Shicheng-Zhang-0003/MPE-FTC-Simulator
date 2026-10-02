@@ -1,0 +1,24 @@
+# Build outputs. DESPOT-2026-10-02: README_MFS.md and docs/ARCHITECTURE.md
+# both claimed build/ and plugins/ were "gitignored build output", but this
+# repository had NO .gitignore at all and 13 object/shared-object files had
+# been committed since the initial import (02fe0b2). The documentation was
+# describing an intent the repository never implemented. Binary objects in
+# history also make every clone carry dead weight and make `git diff` on
+# source changes unreadable.
+build/
+temp/
+plugins/
+*.o
+*.d
+*.a
+*.so
+*.dll
+*.exe
+*.lib
+
+# Editor / OS noise
+*.swp
+*~
+.DS_Store
+compile_commands.json
+.cache/
