@@ -32,6 +32,15 @@ plugins/                            # build output only (gitignored)
 build/                              # object files (gitignored)
 ```
 
+## Validation
+
+Two tiers, deliberately separate. Most tests re-derive what the code claims
+or compare two paths through the same model — that cannot catch a shared
+misconception. `external_truth` checks the model against constants and laws
+that are not this project's (`g_n = 9.80665`, CODATA 2022, exact), so a
+shared error cannot cancel. Full table and findings in
+`docs/VALIDATION.md`.
+
 ## Module vs submodule (hard rule)
 
 - A **module** exports an MPI descriptor (`mpe_module_desc_t`: attach /

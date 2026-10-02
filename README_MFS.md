@@ -22,7 +22,7 @@ v15S/src/ecosystem/mfs/                  # MFS root ("mfs-simulator")
   README_MFS.md                          # this file
   Makefile                               # unified standalone build (thin .so, build/ objs)
   mfs_sources.mk                         # canonical engine+FTC file lists (mirrored in build_tests.sh)
-  build_tests.sh                         # FTC/robotics test build + run (13 gated (unified) + build checks + ungated diags)
+  build_tests.sh                         # FTC/robotics test build + run (14 gated (unified) + build checks + ungated diags)
   mfs_ecosystem.c                        # overarching descriptor: registers
                                          #   modules/module_1 + modules/ftc
   mfs_internal.c/.h                      # internal static module registry
@@ -42,7 +42,7 @@ v15S/src/ecosystem/mfs/                  # MFS root ("mfs-simulator")
         motor.c/.h                       # DC electrical model
         motor_presets.c/.h               # 57-preset FTC catalog (see docs/)
         battery.c/.h                     # sag + drain model
-  tests/                                 # teleop, mecanum, tank, odometry,
+  tests/                                 # teleop, mecanum, tank, odometry, external-truth,
                                          # ftc integration, physics truth,
                                          # hotload, module_1 test,
                                          # mfs_test_common.h (shared setup:
@@ -56,6 +56,7 @@ v15S/src/ecosystem/mfs/                  # MFS root ("mfs-simulator")
     TESTING.md                           # suite gates, how to run, sanitizers
     KNOWN_FAILURES.md                    # ticketed frontiers (strafe, air-spin)
     SYNC_CONTRACT.md                     # twin-tree sync with the 475 copy
+    VALIDATION.md                        # external-truth reference, 76 checks, findings
   plugins/                               # build output only (gitignored):
                                          # mpe_ftc.so lands here
 ```

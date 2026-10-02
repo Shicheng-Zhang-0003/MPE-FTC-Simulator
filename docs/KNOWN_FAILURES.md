@@ -277,6 +277,95 @@ which is why that ceiling is 0.35 and not 0.25.
 errors, zero UBSan runtime errors, zero leaks (only the intentional hotload
 ODR heuristic suppressed).
 
+## [DESPOT-2026-10-02] External-truth validation: what held and what did not
+
+Full table, constants and authorities in `docs/VALIDATION.md`. 76 automated
+comparisons against references computed independently (closed-form textbook
+algebra, or from-scratch RK4), **76 passed / 0 failed**, plus a permanent
+`external_truth` gate. Constants were fetched, not remembered:
+`g_n = 9.80665 m/s²` (CGPM 1901 / CODATA 2022, exact), `atm = 101325 Pa`,
+`ρ = 1.225 kg/m³` (ISA sea level), `C_d = 0.47`.
+
+**Validated exactly (0.00% error, five significant figures):**
+- Rotational dynamics `α = τ/I`; cylinder inertia `½mr²`; sphere inertia `⅖mr²`.
+- **The engine's air drag is exactly linear viscous with `c = −ln(drag)` per
+  second.** Integrating `dv/dt = −g − cv` with `c = 0.0100503 /s` predicts a
+  2 s free-fall velocity of −19.4241 m/s; the engine produces −19.4241 m/s,
+  and the closed form agrees with an independent RK4 to 1e-6.
+- DC motor: stall endpoint equals the published spec; free speed equals
+  `V/(K_e·gear)` and scales by exactly 12.8/12.0; the whole V–ω line matches
+  `I = (V − K_eω)/R` to ≤0.15%.
+- Battery OCV curve, `V = OCV − I·R_int`, PTC brownout voltage, and the
+  1 h / 3 A capacity drain — all 0.00%.
+
+**Valid to expected discretisation error:** free fall 0.16%, Coulomb sliding
+distance 5.0%, energy conservation 0.31% over a 4.9 m drop, elastic-collision
+velocities and momentum 0.67%, rolling no-slip residual 0.17%, restitution
+5–6% typical (15.7% worst), PTC `I²t` trip time 0.80%.
+
+### [DRAG-122x] The engine's drag cannot represent real air (OPEN, documented)
+
+`world.drag = 0.99` is `c = 0.0100503 /s`, a **terminal speed of 976 m/s**.
+Quadratic aerodynamics for the same 42 mm / 2.6 g ball (`C_d = 0.47`,
+`ρ = 1.225`) gives **8.00 m/s**. The engine's own drag is **122×** too weak.
+
+Not a bug — the config schema says so outright ("VISCOUS retention base
+(truth: linear viscous c=−ln(drag), NOT quadratic aero)"). Recorded because
+the consequence was nowhere written down: **the BioBuzz ball's flight time
+and range are set almost entirely by the quadratic term `mfs_module_1` adds on
+top**, not by the engine. Tuning ball flight from the engine alone will
+correctly conclude drag is negligible, and reach the wrong answer.
+
+### [BOUNDARY-E0] The y=0 boundary box is perfectly plastic (OPEN, documented)
+
+`boundary_apply_box_cfg(..., {-250,0,-250}, {250,500,250}, ...)` is applied to
+every non-static body **regardless of `static_plane_enabled`**. With the
+material plane disabled this leaves a frictionless, perfectly-plastic
+(e = 0) backstop at y = 0.
+
+Measured: with no material floor, a ball dropped from 5 m never rebounds
+(`e_eff = 0`) at any radius from 0.02 m to 0.64 m. With a material slab
+present, restitution is correct at every one of those radii (effective
+0.216 / 0.430 / 0.639 / 0.843 for set 0.20 / 0.40 / 0.60 / 0.80, a
+consistent +6% discrete-impulse bias).
+
+**Operational consequence:** a test that forgets a material floor is not
+measuring `e = 0` — it is measuring the boundary, and will report a bounce
+failure that has nothing to do with the restitution it meant to exercise.
+The `external_truth` gate places its slab with the top at exactly `y = +1.0`,
+clear of the boundary, and says why.
+
+### [GRAVITY-BIAS] Engine gravity is +0.0342% off `g_n` (OPEN, now measured)
+
+`world.gravity` defaults to `-9.81`; the standard value is `9.80665`, exact.
+The bias is small but systematic and enters every normal load, so it scales
+every friction budget and rolling-resistance term. Now *reported* by the
+`external_truth` gate rather than left implicit in a default. Correcting the
+engine default is a 475-tree change and is out of MFS scope.
+
+### Retracted during this audit — recorded because it nearly shipped
+
+- **"Restitution is 51% wrong."** Measured by comparing a rebound APEX against
+  `e²(h−r)+r` on a slab whose thickness was 2 m instead of 1 m, so the
+  reference geometry was wrong and the ball never reached the intended
+  surface (`ymin = 1.54` against a nominal `1.05`). Measured in the
+  **defining velocity form** `v_out = e·v_in`, restitution is correct.
+  Restitution must be gated in velocity, not apex: the apex form mixes in the
+  bounce count, the trigger instant and drag.
+- **"The rotate mixer signs are inverted."** Already retracted earlier the
+  same day; see the `DESPOT-2026-10-02` section above.
+
+### Declared coverage gaps
+
+- Cylinder inertia about a **transverse** axis (`m(3r²+L²)/12`) is exercised
+  by no test; only the symmetry axis and the sphere are gated.
+- **Angular** momentum in oblique and multi-body contacts is unvalidated
+  (linear momentum is, to 0.67%).
+- The **analytic mecanum lateral force** is gated for behaviour (axis
+  dominance, anti-symmetry) but its magnitude has no independent
+  roller-contact reference, because it is an admitted continuum
+  approximation with no closed form.
+
 ## Historical (fixed, kept for forensics)
 
 - Preset table mixed NeveRest-class RPMs with invented torques under
