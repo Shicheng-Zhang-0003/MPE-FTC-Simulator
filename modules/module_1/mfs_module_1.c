@@ -66,7 +66,17 @@ MPE_USED int mfs_module_1_attach(mpe_world_t *world, void **mod_state) {
     if (!state) return -1;
     
     state->world = world;
-    state->max_balls = 16;
+    /* DESPOT-2026-10-02 (programming: decorative bound). This was a bare
+     * literal 16 while MFS_ROBOT_MAX_BALLS existed in the header and was
+     * referenced nowhere — two numbers for one quantity, with the macro
+     * free to drift without changing behaviour. Bound the array and the
+     * spawner from the same constant. */
+    state->max_balls = MFS_ROBOT_MAX_BALLS;
+    if (state->max_balls > (int)(sizeof(state->ball_body_ids) /
+                                 sizeof(state->ball_body_ids[0]))) {
+        state->max_balls = (int)(sizeof(state->ball_body_ids) /
+                                 sizeof(state->ball_body_ids[0]));
+    }
     state->shooter_target_rpm = MFS_SHOOTER_TARGET_RPM;
     state->intake_speed_rpm = MFS_INTAKE_ROLLER_SPEED_RPM;
     state->gamepad_control_enabled = true;
@@ -567,13 +577,36 @@ MPE_USED void mfs_module_1_shooter_create(mfs_module_1_state *state) {
         flywheel->friction_static = 0.1f;
         flywheel->friction_kinetic = 0.05f;
         
-        /* Revolute joint to chassis for flywheel spin */
+        /* MFS H6 (DESPOT-2026-09-29): the spin axis, the cylinder's own
+         * symmetry axis, and the joint axis were three different directions.
+         *
+         * The engine's cylinder symmetry axis is `cached_axes[0]`, i.e. the
+         * body's local X. The old code created the flywheel with its local X
+         * therefore along the chassis X, then "angled it up by 35 degrees" by
+         * rotating about X — a rotation about X leaves X INVARIANT, so the
+         * disc's symmetry axis never moved at all. Meanwhile the joint was
+         * built about chassis (0,1,0) and the spin-up torque is applied about
+         * (0, cos35, sin35). So a thin disc was being driven to spin about an
+         * axis lying largely in its own plane: a tumble, not a flywheel, with
+         * the wrong rim speed at the contact patch and therefore no way to
+         * launch at 35 degrees.
+         *
+         * Fix: make all three the same axis. We want the rim velocity (which
+         * is perpendicular to the symmetry axis) to leave at 35 degrees above
+         * horizontal, so the symmetry axis is (0, cos35, sin35) in chassis
+         * coordinates. Rotating the body's local X onto that is a 90 degree
+         * rotation about the unit perpendicular (0, -sin35, cos35). */
+        float spin_tilt = MFS_SHOOTER_LAUNCH_ANGLE_DEG * (float)M_PI / 180.0f;
+        float sp_cos = cosf(spin_tilt), sp_sin = sinf(spin_tilt);
+        vector3 spin_axis_chassis = {0.0f, sp_cos, sp_sin};
+
+        /* Revolute joint to chassis for flywheel spin, about the SAME axis. */
         int joint_idx = constraint_add_revolute(world,
             chassis->object_id,
             flywheel->object_id,
             (vector3){0.0f, MFS_ROBOT_CHASSIS_HEIGHT*1.0f, -MFS_ROBOT_CHASSIS_LENGTH*0.5f - 0.05f},
             (vector3){0.0f, 0.0f, 0.0f},
-            (vector3){0.0f, 1.0f, 0.0f});  /* spin axis = Y (horizontal) */
+            spin_axis_chassis);
         if (joint_idx >= 0) {
             state->shooter_pivot_joint = joint_idx;
         } else {
@@ -582,11 +615,13 @@ MPE_USED void mfs_module_1_shooter_create(mfs_module_1_state *state) {
             fprintf(stderr, "[mfs-module-1] shooter_create: revolute joint failed (pool exhausted?)\n");
         }
         
-        /* Angle the flywheel up by 35 degrees */
-        float angle = MFS_SHOOTER_LAUNCH_ANGLE_DEG * M_PI / 180.0f;
+        /* Orient the disc so its symmetry axis (local X -> cached_axes[0])
+         * IS the spin axis. See the H6 note above: the previous tilt about X
+         * could not move the symmetry axis, because that is the axis it
+         * rotates about. */
         rigidbody *flywheel_body = &world->bodies[flywheel_idx];
         flywheel_body->orientation = vector4_from_axis_with_angle(
-            (vector3){1.0f, 0.0f, 0.0f}, angle);
+            (vector3){0.0f, -sp_sin, sp_cos}, (float)M_PI * 0.5f);
         rigidbody_update_axes(flywheel_body);
     }
     
@@ -685,33 +720,76 @@ MPE_USED void mfs_module_1_intake_step(mfs_module_1_state *state, float dt) {
         physics_world_body_by_id(world, (uint32_t)state->intake_roller_body);
     if (!roller) return;
     
-    /* Control intake roller speed */
-    float target_omega = state->intake_active ? 
-        (state->intake_speed_rpm * M_PI / 30.0f) : 0.0f;
-    
-    /* M7 AXIAL PROJECTION FIX: the sign of the roller's spin was read from
-     * the world X component of angular_velocity, while the drive torque below
-     * is applied about the roller's own world axle (cached_axes[0]). When the
-     * roller yaws with the chassis those two disagree, so the controller
-     * compared the target against |omega| with the wrong sign and drove the
-     * roller the wrong way (or oscillated). Project onto the axle instead:
-     * the error is simply target minus actual axial spin. */
-    float axial_omega = vector3_dot(roller->angular_velocity, roller->cached_axes[0]);
-    float omega_error = target_omega - axial_omega;
-    
-    /* Simple P-control for intake motor */
-    float torque = omega_error * 0.2f;  /* Proportional gain */
-    if (torque > 0.5f) torque = 0.5f;
-    if (torque < -0.5f) torque = -0.5f;
+    /* MFS H5 (DESPOT-2026-09-29): the intake roller had TWO actuators fighting
+     * each other, and neither was wired to the state that controls intake.
+     *
+     *  1. The revolute joint motor, enabled once at creation with
+     *     `intake_speed_rpm` and never touched again — permanently on, at the
+     *     creation-time speed.
+     *  2. A P-control here that applied torque directly to the roller body.
+     *
+     * Consequences: the P-control correctly targeted 0 when `intake_active`
+     * was false, but the joint motor kept driving at full creation speed
+     * regardless, so THE INTAKE COULD NOT BE STOPPED. Conversely the speed
+     * slider (600-1200 RPM) and the momentary-reverse `intake_power` were
+     * dead: the slider never reached the motor, and `intake_power` was
+     * written twice and read by nothing at all.
+     *
+     * Fix: ONE actuator, the joint motor, driven from state every tick. The
+     * P-control is removed rather than kept alongside it — two controllers on
+     * one joint is the defect, not a redundancy, and the joint motor is the
+     * right one because it is solved inside the constraint system (so it
+     * cannot fight the joint) and honours motor_max_torque. */
+    float target_omega = 0.0f;
+    if (state->intake_active) {
+        target_omega = state->intake_speed_rpm * M_PI / 30.0f;
+        /* `intake_power` < 0 is the momentary reverse (B while held). It was
+         * previously dead; honour it now. */
+        if (state->intake_power < 0.0f) target_omega = -target_omega;
+    }
+    if (state->intake_pivot_joint >= 0) {
+        /* enabled even at target 0: that is what actually brakes/coasts the
+         * roller to a stop instead of leaving it spinning forever. */
+        constraint_set_revolute_motor(world, state->intake_pivot_joint, true,
+                                      target_omega, 0.5f);
+    }
 
-    /* Torque about the roller's world axle (cached_axes[0]), not raw X:
-     * the roller yaws with the chassis. */
-    roller->torque_accumulator =
-        vector3_addition(roller->torque_accumulator,
-                         vector3_scaling(roller->cached_axes[0], torque));
-    
+    /* M7 AXIAL PROJECTION FIX, now moot for actuation but worth keeping the
+     * principle on record: the roller's spin is about its own world axle
+     * (cached_axes[0]), not raw X, because the roller yaws with the chassis.
+     * The joint motor projects on the joint axis, so it needs no fix. */
+
     /* Ball pickup detection: check contacts between intake and balls */
     if (state->intake_active) {
+        /* DESPOT-2026-10-02 (the declared carry limit did not exist).
+         * MFS_ROBOT_MAX_CARRIED_BALLS has been declared in the header since
+         * it was written, described in the DESPOT-FIX note above as "the
+         * gameplay CARRY limit", and never read by any code path: the intake
+         * below pulled in every ball it touched, up to the 16-ball storage
+         * bound. A limit that is written down and not enforced is worse than
+         * no limit, because a reader sizes gameplay assumptions from it.
+         *
+         * "Carrying" is counted as balls actually held against the intake
+         * throat, not balls ever touched — a robot that has driven over and
+         * past a ball is not carrying it, and must be able to pick up again
+         * after the previous ball is discharged. Counted with the same
+         * pickup_radius the pickup test below uses, so the two cannot
+         * disagree about what "in the intake" means. */
+        int carried = 0;
+        for (int i = 0; i < state->ball_count && carried < MFS_ROBOT_MAX_CARRIED_BALLS; i++) {
+            int ball_idx = physics_world_index_by_id(world, state->ball_body_ids[i]);
+            if (ball_idx < 0) continue;
+            rigidbody *b = &world->bodies[ball_idx];
+            vector3 d = vector3_subtraction(b->position, roller->position);
+            if (vector3_length(d) < MFS_INTAKE_ROLLER_RADIUS +
+                                      MFS_BIOBUZZ_BALL_RADIUS +
+                                      MFS_INTAKE_COMPLIANCE) {
+                carried++;
+            }
+        }
+        if (carried >= MFS_ROBOT_MAX_CARRIED_BALLS) {
+            return;  /* hopper full: hold station, do not draw more in */
+        }
         for (int i = 0; i < state->ball_count; i++) {
             int ball_idx = physics_world_index_by_id(world, state->ball_body_ids[i]);
             if (ball_idx < 0) continue;
@@ -851,6 +929,38 @@ MPE_USED void mfs_module_1_shooter_step(mfs_module_1_state *state, float dt) {
                         vector3 force = vector3_scaling(launch_dir,
                             MFS_BIOBUZZ_BALL_MASS * dv / dt);
                         rb_apply_forces_localised(ball, force, ball->position);
+                    }
+
+                    /* MFS H7 (DESPOT-2026-09-29): the launch transferred
+                     * linear velocity ONLY. The ball therefore left with
+                     * angular_velocity == 0, and ball_physics_step's Magnus
+                     * branch is gated on `spin_rate > 10.0` rad/s -- so the
+                     * model was structurally unreachable from the shooter.
+                     * The spin code was live but dead in practice: the only
+                     * way a ball could ever spin was being struck off-centre
+                     * by the contact solver, which is not a shooter.
+                     *
+                     * A ball driven by a flywheel is spun by contact friction
+                     * until its own contact point matches the flywheel's
+                     * surface. Using the same omega x r = v convention the
+                     * flywheel itself uses, that is
+                     *     omega_ball = v_surface / r_ball
+                     * so the smaller ball spins FASTER than the surface speed
+                     * implies -- which is why a 50 mm flywheel at 4000 rpm
+                     * (surface 20.9 m/s) hands a 24 mm ball ~870 rad/s.
+                     *
+                     * This is a contact-model approximation, not a friction
+                     * solve: it does not resolve slip, so it cannot express
+                     * "the ball skids instead of rolling". It is strictly
+                     * better than the previous state, where the spin channel
+                     * was never written at all, and it is applied with the
+                     * same 80% transfer as the linear term so the two stay
+                     * self-consistent. */
+                    if (MFS_BIOBUZZ_BALL_RADIUS > 1e-4f) {
+                        vector3 spin = vector3_scaling(surface_vel,
+                            0.8f / MFS_BIOBUZZ_BALL_RADIUS);
+                        ball->angular_velocity =
+                            vector3_addition(ball->angular_velocity, spin);
                     }
 
                     state->balls_fired++;  /* fired, not scored: no goal detection exists */

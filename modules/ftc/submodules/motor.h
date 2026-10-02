@@ -33,9 +33,17 @@ typedef struct {
     float temperature; /* simplified thermal model */
     /* Disturbance observer (implicit-load solve): external load torque
      * = measured net torque effect minus last tick's explicit motor
-     * torque. Lets the implicit solve hold full stall torque against
-     * locked wheels (prediction-error observers converge to a soft
-     * fixed point ~6x low) while staying stable on free wheels. */
+     * torque. Lets the implicit solve hold near-full stall torque against
+     * locked wheels while staying stable on free wheels.
+     * DESPOT-2026-09-29: the old comment here claimed prediction-error
+     * observers "converge to a soft fixed point ~6x low". That was measured,
+     * not assumed, by the new gated `mfs_t_stall_endpoint`: engaging the
+     * observer softens the locked-rotor endpoint by 16% (3.1279 N.m against
+     * a 3.7265 N.m spec), not 6x. The claim is retracted. */
+    /* Set ONLY by motor_observe(), in the same module that consumes it
+     * (DESPOT-2026-09-29). Callers must not touch wprev_valid/load_torque/
+     * w_prev directly: they used to, which meant a caller that forgot left a
+     * silently dead observer (tau_L == 0) with no diagnostic. */
     float load_torque;
     float w_prev;
     float tau_exp_prev;
@@ -61,5 +69,12 @@ void motor_update_load(motor *m, float wheel_angular_vel, float dt, float batter
 /* DESPOT-FIX: defined in motor.c but never declared — every caller took an
  * implicit declaration (works by ABI luck, breaks under -Werror). */
 void motor_reset_observer(motor *m);
+/* Disturbance-observer update: estimate the external load on the wheel from
+ * the measured shaft acceleration and last tick's explicit motor torque, and
+ * publish it (with its validity flag) for motor_update_load() to consume.
+ * Call once per wheel per tick, BEFORE motor_update_load(). Safe to call on
+ * every consumer path: it cannot be called wrong into a dead observer.
+ * DESPOT-2026-09-29. */
+void motor_observe(motor *m, float wheel_angular_vel, float dt, float axle_inertia);
 
 #endif /* motor_h */

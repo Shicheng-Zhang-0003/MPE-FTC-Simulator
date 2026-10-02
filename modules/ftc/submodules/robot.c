@@ -629,6 +629,23 @@ fail:
         world->body_count = body_watermark;
         physics_world_bump_revision(world);
     }
+    /* DESPOT-2026-10-02 (programming: stale indices survived the unwind).
+     * This path re-poisoned wheel_joints and roller_joints but left
+     * wheel_bodies holding whatever partial creation had written. Those
+     * indices now point at bodies at/below the rewound watermark — i.e. at
+     * whatever ELSE owns those slots after the rewind, or out of range if
+     * the pool shrank. A caller that inspected the half-built robot after a
+     * -1 return (debug print, retry loop, a fleet that logs and continues)
+     * would read another robot's wheel as its own. Poison the body indices
+     * in the same breath as the joint indices so every accessor in the
+     * struct agrees that the robot does not exist. */
+    for (int i = 0; i < FTC_MAX_WHEELS; i++) {
+        robot->wheel_bodies[i] = -1;
+    }
+    memset(robot->roller_bodies, 0xFF, sizeof(robot->roller_bodies));
+    for (int i = 0; i < FTC_MAX_WHEELS; i++) {
+        robot->roller_count[i] = 0;
+    }
     robot->chassis_body = -1;
     robot->wheel_count = 0;
     return -1;
@@ -737,28 +754,15 @@ void ftc_robot_update(physics_world *world, ftc_robot *robot, float dt) {
          * uncorrectable by this motor anyway — capping there keeps full
          * locked-rotor tracking (stall needs 1x) while starving the chaos
          * loop 13x. Same convergence point, stable path. */
-        float axle_I = 0.5f * wheel->mass * r_run * r_run;
-        if (robot->wheel_motors[i].wprev_valid && axle_I > 0.0f && dt > 0.0f &&
-            isfinite(wheel_speed)) {
-            float tau_l = axle_I * (wheel_speed - robot->wheel_motors[i].w_prev) / dt -
-                          robot->wheel_motors[i].tau_exp_prev;
-            float stall_out = robot->wheel_motors[i].stall_current *
-                              robot->wheel_motors[i].kt *
-                              robot->wheel_motors[i].gear_ratio *
-                              robot->wheel_motors[i].efficiency;
-            if (!(stall_out > 0.5f) || !isfinite(stall_out)) stall_out = 1.0f;
-            float tau_cap = 2.0f * stall_out;
-            if (!isfinite(tau_l)) {
-                tau_l = 0.0f;
-            } else if (tau_l > tau_cap) {
-                tau_l = tau_cap;
-            } else if (tau_l < -tau_cap) {
-                tau_l = -tau_cap;
-            }
-            robot->wheel_motors[i].load_torque = tau_l;
-        }
-        robot->wheel_motors[i].w_prev = isfinite(wheel_speed) ? wheel_speed : 0.0f;
-        robot->wheel_motors[i].wprev_valid = 1;
+        /* DESPOT-2026-09-29: the disturbance observer now lives in motor.c
+         * (motor_observe), in the same module as the gate in
+         * motor_update_load that consumes it. It used to be inlined here
+         * while motor.c only ever READ wprev_valid, so a caller that forgot
+         * to set it got a silently dead observer (tau_L == 0) with no
+         * diagnostic. That mistake produced a wrong diagnosis of the stall
+         * endpoint; see KNOWN_FAILURES.md -> MOTOR-III-2026-09-29. */
+        motor_observe(&robot->wheel_motors[i], wheel_speed, dt,
+                      0.5f * wheel->mass * r_run * r_run);
 
         /* MFS_TRACTION_CONTROL: compare against the rolling speed the
          * chassis motion demands at this wheel (rigid-body velocity at
@@ -882,7 +886,28 @@ void ftc_robot_update(physics_world *world, ftc_robot *robot, float dt) {
             if (dl > max_slew) want = prev + max_slew;
             else if (dl < -max_slew) want = prev - max_slew;
             torque = want;
-            robot->wheel_applied_torque[i] = torque;
+            /* DESPOT-2026-10-02 (programming lie: the slew state was the
+             * wrong number). The store used to happen HERE, before the
+             * free-speed governor and the idle brake below, both of which
+             * may CUT torque. So the field named wheel_applied_torque did
+             * not hold the torque that was applied: it held the largest
+             * value the pipeline had passed through this tick. The slew
+             * limiter is a rate limit on DELIVERED torque, so its memory
+             * has to be delivered torque.
+             *
+             * Consequence while it was wrong: the governor zeroes torque
+             * whenever the wheel sits at/over its free-speed bound, and the
+             * idle brake clamps it to exactly stop-in-one-tick. In both
+             * cases the stored state stayed high, so the moment the wheel
+             * came back under the bound (load rise, or the brake releasing
+             * as |w| decayed) the full pre-shaping torque was reinstated in
+             * a single tick with no ramp — exactly the 0->stall step the
+             * slew exists to prevent, reintroduced through the back door
+             * the moment the governor or brake had clipped anything.
+             *
+             * The store now happens after every shaping stage, immediately
+             * before the accumulator write, so the field means what its name
+             * says: the torque banked into the axle on the previous tick. */
         }
         /* Free-speed governor: a motor cannot push its wheel past free
          * speed under its own power. Below free speed torque is untouched
@@ -929,6 +954,13 @@ void ftc_robot_update(physics_world *world, ftc_robot *robot, float dt) {
                 }
             }
         }
+        /* DESPOT-2026-10-02: bank the DELIVERED torque into the slew state
+         * here, after the governor diode and the idle brake, not before
+         * them (see the slew block above for why the old position made
+         * wheel_applied_torque a fiction). This is the value the next tick
+         * slews from, so it must be the value that actually reached the
+         * axle accumulator below. */
+        robot->wheel_applied_torque[i] = isfinite(torque) ? torque : 0.0f;
         /* Apply the motor torque about the real axle, as a TORQUE COUPLE:
          * +tau on the hub, -tau on the chassis. A motor is two bodies acting
          * on each other, so the reaction is not optional - applying tau to the
