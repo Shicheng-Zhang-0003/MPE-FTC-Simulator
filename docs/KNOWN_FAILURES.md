@@ -39,25 +39,37 @@ silent passes. Measurements from the 2026-09-26 audit on this tree.
 - **Revert path:** `ftc_robot_set_mecanum_analytic_default(0)` before
   creation restores the articulated real-roller build (forensics).
 
-## [MFS-STRAFE-F2] Odometry strafe tracking (FIXED 2026-09-28)
+## [MFS-STRAFE-F2] Odometry strafe tracking (PARTIALLY FIXED — TRACKING IS STILL OPEN)
 
 - **Transmit half FIXED (analytic lateral):** strafe physics reaches
-  0.87 m in 1 s vs 0.10 m required; hard-gated.
-- **Tracking half FIXED (voltage-scaled motor/governor bounds):** encoders
-  report ~1.08 m vs 0.87 m physics (~25% over; needs <= 30%). Was 88% over
-  (~1.53 m vs 0.81 m): the implicit clamp took min(spec, V-line) while the
-  explicit observer twin ran unclamped, so at fresh-pack voltage the two
-  paths disagreed 6.7% and the observer carried a phantom load into peel.
-  Scaling BOTH bounds to the V-line no-load point `Vterm/(kv·gear)`
-  (motor.c clamp + robot.c governor, spec kept as Kv-degenerate fallback)
-  closed it — isolated by A/B (spec-fixed bounds reproduce 88%, V-line
-  bounds give 25%, transmit 3.40 m both ways). `odom_slip` still flags real
-  slip elsewhere. Deterministic (bit-identical across runs, -O2 and
-  -O1+ASan, zero sanitizer errors).
-- **Margin note:** 25% vs 30% allowed is thin. The suite's XFAIL branch
-  stays as a fallback tripwire (fires only if tracking ever regresses past
-  30%), not as the verdict. Phase-1 forward tracking (8.9%) stays
-  hard-gated with room to spare.
+  0.87 m in 1 s vs 0.10 m required; hard-gated. Confirmed still green.
+- **Tracking half IS NOT FIXED. This entry said FIXED; it was not.**
+  Re-measured 2026-10-03 by running the gate:
+
+      Phase 2: strafe: physics dx=0.6318 odometry dx=0.9076
+      [XFAIL][MFS-STRAFE-F2] strafe phys=0.6318 odom=0.9076 (tracking open)
+
+  That is **+43.7%** (|0.9076 - 0.6318| / 0.6318), outside the 30% band. The
+  entry previously claimed "encoders report ~1.08 m vs 0.87 m physics (~25%
+  over; needs <= 30%)" — **neither number matches what the suite prints**, and
+  the 25% claim sat inside the band while the actual 43.7% does not. So the
+  write-up reported a passing margin for a check that is in fact red.
+
+  What the earlier work actually achieved: the implicit clamp took
+  min(spec, V-line) while the explicit observer twin ran unclamped, so at
+  fresh-pack voltage the two paths disagreed 6.7% and the observer carried a
+  phantom load into peel. Scaling BOTH bounds to the V-line no-load point
+  `Vterm/(kv*gear)` (motor.c clamp + robot.c governor, spec kept as
+  Kv-degenerate fallback) narrowed it substantially — from 88% over to
+  something much smaller — but did not close it. Transmit is 2.2872 m
+  (previously documented as 3.40 m, itself stale; the gate prints the truth).
+- **Why it was not caught:** the XFAIL branch is surfaced by the runner as a
+  non-blocking marker, so a red frontier is *visible* without being *blocking*.
+  That is the correct design for a known-red frontier — but it means "green
+  suite" and "no open defects" are different claims, and this entry conflated
+  them. Corrected here.
+- `odom_slip` still flags real slip elsewhere. Behaviour is deterministic
+  (bit-identical across runs, -O2 and -O1+ASan, zero sanitizer errors).
 
 ## Solver mathematics: why GS could not converge the 5-link chain
 
@@ -108,6 +120,77 @@ silent passes. Measurements from the 2026-09-26 audit on this tree.
   rollers) with observer resets; whole-assembly teleport without them
   winches wheels through pendulum chaos (historical false failures).
 
+## [STALL-THERMAL] The -16% stall softening was thermal, not the observer (RESOLVED 2026-10-03)
+
+Recorded here because it was **twice** attributed to the wrong mechanism, and
+because the wrong attribution had already hardened into a test tolerance.
+
+The closed-loop locked-rotor endpoint read **3.1279 N·m** against a
+**3.7265 N·m** spec (-16%) and was blamed on "the observer -> implicit-solve
+coupling". The gate was then widened to **25%** to accommodate it. Measured
+2026-10-03 with the observer armed identically in both runs and copper
+temperature as the only variable:
+
+| | output torque | vs spec |
+|---|---|---|
+| thermal active | 3.12793 N.m | **-16.062%** |
+| temperature pinned at 25 C | **3.72650 N.m** | **+0.000%** |
+
+**The observer contributes exactly nothing.** The mechanism is `motor.c`'s
+copper model `r_eff = R*(1 + 0.00393*(T - 25))`, which reaches `r_eff/R =
+1.19237` at 73.95 C after 300 stall ticks (5 s), and `1/1.19237 = 0.8387`,
+i.e. the whole -16.1%. A motor held at 25 C delivers the full spec stall
+torque through the observer without difficulty.
+
+**Consequence, and why it mattered:** a 25% band chosen to absorb a thermal
+artefact is indistinguishable from a warm motor, so the gate could not have
+failed for the reason it exists -- a genuine 25%-off observer regression would
+have sailed through. Fixed by removing the confound rather than absorbing it:
+`mfs_t_stall_endpoint` now gates BOTH the derated value against the
+`r_eff(T)` model (2%) and the 25 C value against spec at **2%**, 12.5x tighter
+than the band it replaces. Header comment at `motor.h` corrected too.
+
+**Do not conflate with [MOTOR-III] below.** That entry is a real and separate
+defect (the observer books post-shaping losses as external load, which
+destroys large-load torque). It is NOT what this 16% is. Two different things
+were being called one thing for three days.
+
+---
+
+## [FREE-SPEED-DEAD-OBSERVER] Both free-speed gates measured a disabled observer (RESOLVED 2026-10-03)
+
+The readme claimed the back-EMF model made "stall **and free speed** exact at
+any bus voltage", and two gates appeared to back it: `mfs_t_motor_free_speed`
+and the `external_truth` sub-7 free-speed check. **Neither called
+`motor_observe()`.** With no call, `m.wprev_valid` stays 0, `tau_L` is
+identically 0, and the disturbance observer is simply absent from the
+measurement -- while the shipped drivetrain arms it every tick
+(`robot.c:764`). The gates measured a configuration the engine never runs in.
+
+Same rig, same build flags, 180 ticks:
+
+| | free speed | vs the no-load line |
+|---|---|---|
+| observer **not** armed (gates as written) | 237.8667 rpm | **+0.0000%** |
+| observer armed, exactly as `robot.c` | 92.0172 rpm | **-61.3156%** |
+
+So the exact-0.00% figure was real but described a dead estimator, and the
+driven wheel sits 61% off the no-load line.
+
+**Resolved by splitting the claim, not by picking a winner.** Free speed is
+independent of winding resistance and of load *by construction*:
+`w_free = V/(kv*gear)` with `kv = V_nom/(w_free_spec*gear)`, so `R` cancels
+exactly. That makes the open-loop check a sharp, estimator-independent test of
+the electrical model and the preset constants -- so it is **kept, and now
+labelled open-loop** in both gates. The observer-armed number is not a free
+speed at all; it is the air-spin / [MOTOR-III] limit-cycle fixed point. It is
+printed with its honest -61.3%, gated on being finite and bounded (not running
+away), and tracked as a defect where it belongs. Pinning a tolerance to a
+limit cycle would be inventing a specification, which is precisely the
+fabricated-tank-target failure retracted on 2026-09-29.
+
+---
+
 ## [MOTOR-III] Disturbance observer feeds shaping back as external load (OPEN, root-caused further)
 
 This is the blocker for [MOTOR-I]/[MOTOR-II], and fixing it revealed a second
@@ -115,7 +198,7 @@ problem. Recorded 2026-09-29.
 
 - **Defect:** the observer computes
   `tau_L = I*(w - w_prev)/dt - tau_exp_prev`, and `tau_exp_prev` is the RAW
-  unshaped `Kt*I*gear*eff` (`motor.c:224`). The torque actually delivered is
+  unshaped `Kt*I*gear*eff` (`motor.c:228`). The torque actually delivered is
   then multiplied by the traction scale, slew-limited, governor-dioded and
   idle-brake-clamped. So `(delivered - raw)` is booked as "external load"
   every tick. With the traction cut at 0.15x that is 85% of motor torque
@@ -146,6 +229,99 @@ problem. Recorded 2026-09-29.
   braking term. Only then should the correct motor model from [MOTOR-II] be
   re-applied; doing it in the other order destabilises the stall endpoint, and
   doing both at once zeroes drive entirely (measured: strafe transmit 0.00 m).
+
+## [RELEASE-STORM] Zero-command motor limit cycle + glide equilibrium (FIXED 2026-10-04)
+
+Live-session report: wheels tilt/pivot off their shafts, and motor speeds
+never revert to 0 on stick release. Forensics, in order — including one
+retracted measurement (honesty first):
+
+- **Retracted characterization (harness bug, owned):** the ±70 rad/s
+  zero-command storm and the ±25 rad/s frozen glide were measured under a
+  DOUBLE-driven probe harness (manual drivetrain_update plus fleet
+  pre_step in the same tick). Re-measured single-driven (fleet only, the
+  live topology), release settles on EITHER code — the storm as described
+  never existed single-driven. The fixes below stand anyway (suite-green,
+  principled hardening), but their live effect is narrower than first
+  claimed: what they provably fix single-driven is the next bullet.
+- **Post-idle re-drive death (proven single-driven):** after any release,
+  the next drive died ~7x (strafe 1.70 m → 0.28 m, ±stall chatter from
+  tick 0). Cause: the explicit idle path never published `tau_exp_prev`,
+  freezing the drive-phase reference — re-drive planned against a phantom
+  stall. Fix: whichever path runs publishes its expectation (one line in
+  `motor_update`); verified by isolation (publish skipped → 0.28 m).
+- **Idle hardening (principled, suite-green):** at |command| < 0.05 run
+  the explicit regen path (passive damper, exact, memoryless), bypass
+  slew for the brake (slewing an exact-stop value bang-bangs), halve the
+  idle-brake clamp (exact-stop + contact in the same tick overshoots past
+  zero and ping-pongs), restore real 0.9/0.7 hub friction with the
+  analytic lateral parked (one tangential model at a time, never
+  double-counted past the cone). Driven operation is byte-for-byte the
+  validated model (strafe 2.2872 m identical).
+- **Tilt** was the joints telling the truth about churn: 40:1 mass ratio
+  needs the 128 iterations every MFS test pins (default 64 wobbled axles
+  to 15°). Live spawn paths now auto-raise to 128, loudly. Post-fix
+  probe: full stop <1 s after release, tilt ≤1.4° and flat.
+- Locked by the new `release_settle` gate (drive ≥ 0.5 m, then chassis
+  < 0.1 m/s, wheels < 2 rad/s, axles < 3°). MOTOR-III above is untouched:
+  the observer still runs (and still limit-cycles) on the DRIVEN path;
+  idle simply no longer asks it to plan torque.
+- Idle switching is HYSTERETIC (engage <0.03, release >0.08, mode stored
+  in the hub friction fields so motor path, analytic gate and friction
+  switch together): a rescaled-deadzone stick riding a single 0.05
+  threshold flapped all four every tick. Explicit path also publishes
+  tau_exp_prev now (stale drive reference poisoned post-idle re-drive:
+  measured strafe 10x dead until the handshake).
+
+## [ABUSE-TILT] Sustained harsh mixed drive walks axles to flip (OPEN frontier, pre-existing)
+
+Recorded 2026-10-04. Sibling of the fixed items above, NOT fixed: ~90+
+ticks of sustained full mixed drive (0.5 fwd + 0.5 strafe + 0.3 rotate)
+walks wheel axles 5° → 69° → 180° (frozen-in-tilt end state, mounts hold,
+never NaN). Gated behaviors (single-mode bursts ≤180 ticks) stay ≤1.4°.
+
+Recorded 2026-10-04. Sibling of the fixed items above, NOT fixed: ~90+
+ticks of sustained full mixed drive (0.5 fwd + 0.5 strafe + 0.3 rotate)
+walks wheel axles 5° → 69° → 180° (frozen-in-tilt end state, mounts hold,
+never NaN). Gated behaviors (single-mode bursts ≤180 ticks) stay ≤1.4°.
+
+- Pre-existing: pre-change MFS tree blows up identically single-driven
+  (172.8° vs 179.9° current, same session shape), so no fix above caused
+  it — but none cured it either.
+- Six measured negative results (do not re-attempt without new evidence):
+  analytic reaction projected to axle (same onset tick); axis-drift beta
+  0.1 → 0.3 (same blowup); mount-frame motor axle (earlier: 175°);
+  observer frozen (delayed only, 128°); proportional traction-cut engage
+  (same blowup — AND moved tank 0.0642 → 0.0397 m and broke drive
+  antisymmetry, so the slam is load-bearing: reverted); slew 0.6 → 0.2.
+- External cross-reference 2026-10-04 (Box2D v2/v3 sources, Bullet
+  btHingeConstraint sources): BOTH authorities feed hinge-alignment
+  positional error back per-solve — Box2D via a dedicated POSITION pass
+  over every joint row (SolvePositionConstraints, incl. angular), Bullet
+  via ERP on the hinge angular rows (k = fps * ERP on ax1×ax2). Our axis
+  rows are velocity-only (plus a once-per-tick velocity tweak): the odd
+  one out, and the documented gap. An in-loop axis bias mirroring P2P
+  was therefore implemented — and REVERTED twice: at beta 0.3 it bounded
+  the blowup (7° vs 180°) but moved tank -19% and killed reverse-rotate;
+  at beta 0.1 it flipped forward-rotate's SIGN and halved the pivot.
+  Non-monotonic in beta = the pivot regime is chaotic-sensitive to joint
+  formulation. A bolt-on bias cannot ship without a full drive
+  re-baseline; the proper fix is a joint position-correction pass in the
+  style of the references, budgeted as its own task.
+- What IS established: needs motor torque (zeroed-torque abuse stays
+  0.2°/1800 ticks); per-tick wheel jumps hit ±85 rad/s (peel + slew-rail
+  steps on 2.5e-4 inertia); the 0.05-command idle boundary is not the
+  trigger (hysteresis changed nothing here); recovery is impossible once
+  flipped (static rim-lock beats the velocity-level drift corrector —
+  respawn is the recovery).
+- Next honest measurement, not yet taken: per-wheel torque-budget cap at
+  the contact cone (motor can never demand more than the ground can
+  transmit) would remove peel overspeed structurally, but it retunes all
+  drive authority and the suite above proves this loop is gate-calibrated
+  and fragile — budget for a full re-baseline pass before attempting.
+- Governor foldback (ramp to zero across the top 15.5% instead of the
+  diode bang) tried 2026-10-04: delayed the flip (1530 vs 1380 ticks) but
+  did not prevent it. Reverted; the diode stays by design (see robot.c).
 
 ## [DESPOT-2026-10-02] Full mathematical / programming / operational audit
 
@@ -249,6 +425,16 @@ which is why that ceiling is 0.35 and not 0.25.
   `tank` regression baseline was re-measured with the causal chain recorded.
   A limiter is a rate limit on *delivered* torque, so its memory must be
   delivered torque; the alternative is a variable that does not mean its name.
+- **Tick-start friction selection grips the pivot harder (2026-10-04).**
+  Engine-side correction with an understood MFS consequence: stick/slip μ is
+  now selected once per tick from pre-force slip instead of re-decided on
+  solver transient, so rolling wheels keep the full μ_s cone through torque
+  transients (engine breakaway 0.999–1.005 of μ_s·N). The pivot drives
+  slightly harder: tank translation **0.0530 → 0.0642 m (+21%)**, heading
+  1.8741 → 1.9179 (+2.3%, inside its 8% band); mecanum strafe dx=2.2872
+  byte-identical (anisotropic path untouched). Baseline re-measured with the
+  chain in `mfs_suite_a.c`; fixed point verified bit-identical over three
+  `-O2` runs and under `-O1+ASan/UBSan. Structural gates unaffected.
 - **Partial-spawn unwind left stale body indices.** The `fail:` path in
   `ftc_robot_create_with_drive` re-poisoned `wheel_joints` and `roller_joints`
   but left `wheel_bodies` holding whatever partial creation had written. After
@@ -471,7 +657,7 @@ errors, recorded because both nearly became false findings:**
 1. An intermediate version of this test reported the closed loop at
    `0.7081 N.m` (**-81%**), and I wrote that up as a broken
    observer->implicit-solve coupling. **That was wrong: the bug was in my
-   test.** `motor.c:146` gates the load term on `m->wprev_valid`, but
+   test.** `motor.c:158` gates the load term on `m->wprev_valid`, but
    `motor.c` NEVER SETS IT — only `robot.c:797` does. My isolated test never
    performed the handshake, so `tau_L` was silently 0 and I had measured
    "observer disabled", not "observer mis-coupled". The `-81%` figure, and
