@@ -1,5 +1,26 @@
 # MFS — overarching module ecosystem ("mfs-simulator")
 
+> **Audit state (2026-10-06).** The yaw axis was audited by writing probes
+> that test the claims rather than reading them. The suite was 15/15 green
+> with ASan+UBSan clean while **the heading odometry had the opposite sign to
+> the chassis on both drivetrains**, and **no test in the tree read
+> `odom_theta`, `odom_slip` or `clamp_events` at all** — that coverage hole
+> is the real defect. Both bugs are fixed and gated; the coverage hole is
+> closed with a new `odometry_yaw` case that produces 4 failures when the
+> original defects are reintroduced and 0 with the fix. The only yaw
+> measurement in the suite was also **aliasing**: it differenced two
+> `atan2(quaternion)` values and wrapped into `[-pi,pi]`, which folds any
+> real rate above `pi` rad/s to a small plausible number *and inverts its
+> sign* — so the gate written to catch rotate-directionality was passing on an
+> artefact. Now integrates `angular_velocity.y*dt`, which cannot alias.
+> A registry self-detach deadlock was also fixed and gated (`registry`);
+> `mfs_internal.c` had never been linked into the suite at all.
+> One frontier is **open, not fixed**: a full-power mecanum pivot runs ~3.5x
+> past the kinematic ceiling. Root cause is structural (analytic-mode hubs
+> ship zero friction, so there is no longitudinal traction path) and every
+> cheap bound tested either failed or destroyed the F1 strafe. It is ticketed
+> as `[MECANUM-PIVOT]` with its elimination table. Suite **17 gated, 17/17**.
+
 > **Audit state (2026-10-05).** The 2026-10-02 drift recurred with the
 > guard working correctly and nobody reading it. This tree had again fallen
 > behind its twin at `475-MPE/v15S/src/ecosystem/mfs`, now by 19 files of
@@ -34,10 +55,10 @@ history preserved via `git mv`.)
 
 ```
 v15S/src/ecosystem/mfs/                  # MFS root ("mfs-simulator")
-  README_MFS.md                          # this file
+  readme.md                              # this file
   Makefile                               # unified standalone build (thin .so, build/ objs)
   mfs_sources.mk                         # canonical engine+FTC file lists (mirrored in build_tests.sh)
-  build_tests.sh                         # FTC/robotics test build + run (15 gated (unified) + build checks + ungated diags)
+  build_tests.sh                         # FTC/robotics test build + run (17 gated (unified) + build checks + ungated diags)
   mfs_ecosystem.c                        # overarching descriptor: registers
                                          #   modules/module_1 + modules/ftc
   mfs_internal.c/.h                      # internal static module registry
@@ -57,12 +78,16 @@ v15S/src/ecosystem/mfs/                  # MFS root ("mfs-simulator")
         motor.c/.h                       # DC electrical model
         motor_presets.c/.h               # 57-preset FTC catalog (see docs/)
         battery.c/.h                     # sag + drain model
-  tests/                                 # teleop, mecanum, tank, odometry, external-truth,
-                                         # ftc integration, physics truth,
-                                         # hotload, module_1 test,
-                                         # mfs_test_common.h (shared setup:
+  tests/                                 # teleop, mecanum, tank, odometry,
+                                         # external-truth, ftc integration,
+                                         # physics truth, odometry_yaw,
+                                         # hotload, module_1 test, registry,
+                                         # mfs_test.h (framework) +
+                                         #   mfs_test_common.h (shared setup:
                                          #   128 iters + tile floor),
-                                         # (+5 ungated diags)
+                                         # (+12 legacy per-test mains and
+                                         #  ungated diags, wired by
+                                         #  build_tests.sh --all-targets)
   .gitignore                            # build/, temp/, plugins/, *.o/.so
   docs/
     FTC_SPECS.md                         # motor spec-sheet sources + URLs
@@ -122,7 +147,7 @@ Design rules modules follow (and future modules should too):
 From `v15S/src` (canonical — what CI and the release ritual use):
 
 ```
-ecosystem/mfs/build_tests.sh            # full FTC suite (15 inner via unified mfs_suite --all, + build checks + ungated diags)
+ecosystem/mfs/build_tests.sh            # full FTC suite (17 inner via unified mfs_suite --all, + build checks + ungated diags)
 ecosystem/mfs/build_tests.sh --build-only
 ```
 
@@ -217,10 +242,11 @@ physics_world_detach_module(world, "ftc-fleet");
   bodies/joints are built (6 bodies / 4 joints). This replaces the
   retired chassis-force era AND the articulated 32-roller build (kept
   behind `ftc_robot_set_mecanum_analytic_default(0)` for forensics):
-  strafe +X 2.2872 m in 3 s vs 0.30 m gated; diagonal (0.5,0.5) composes
-  (DESPOT-2026-10-03: this figure was documented as 3.40 m. Measured 2.2872 m
-  by the gate itself -- `mfs_suite mecanum` prints it. The old number came from
-  a stale source comment and had drifted from the code.)
+  strafe +X 2.2250 m in 3 s vs 0.30 m gated; diagonal (0.5,0.5) composes
+  (DESPOT-2026-10-06: this figure has now been documented three times and
+  drifted twice. It was 3.40 m (a stale source comment), then 2.2872 m
+  (measured), and is 2.2250 m as of the v_ref change. `mfs_suite mecanum`
+  prints the truth -- read the log, not this file.)
   to (1.19,1.20) m. Odometry is therefore pure encoder kinematics
   and `odom_slip` stays honest (1 during peel, reporting only).
 - Motor model: implicit-in-speed solve with disturbance observer
@@ -255,11 +281,13 @@ physics_world_detach_module(world, "ftc-fleet");
   is never corrected). Encoders are PPR-quantized (counts = base_ppr x
   gear), so creep speeds staircase like hardware.
 - KNOWN FAILURE [MFS-STRAFE-F1 FIXED 2026-09-28, F2 FIXED 2026-09-28]:
-  F1 strafe develops 2.2872 m vs 0.30 m gated (hard-gated in the
-  suite). F2 transmit fixed (physics 0.87 m in 1 s vs 0.10 m, hard-gated)
+  F1 strafe develops 2.2250 m vs 0.30 m gated (hard-gated in the
+  suite). F2 transmit fixed (physics 0.64 m in 1 s vs 0.10 m, hard-gated)
   AND the encoder tracking half is **STILL OPEN, not fixed** — measured
-  2026-10-03: `physics dx = 0.6318`, `odometry dx = 0.9076`, which is
-  **+43.7%**, outside the 30% band. The suite prints this as
+  2026-10-06: `physics dx = 0.6422`, `odometry dx = 0.8463`, which is
+  **+31.8%**, outside the 30% band. (The v_ref 0.05->0.005 change moved this
+  from +43.7%; it did not close the gate, despite a source comment claiming
+  it did. Still prints `[XFAIL][MFS-STRAFE-F2]`.) The suite prints this as
   `[XFAIL][MFS-STRAFE-F2] ... tracking open`, so it is surfaced as a
   known-red marker rather than hidden, but this README described it as
   closed with better numbers than the run produces (it claimed odom 1.08 vs
