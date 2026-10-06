@@ -102,12 +102,17 @@ typedef struct {
  * coefficient for roller-axle slip on tile (wheel-rubber kinetic class;
  * tile muk 0.8 binds, so the wheel is the limiting material) and the
  * Coulomb smoothing speed (linear viscous region below it kills sign
- * chatter; saturated Coulomb above it). */
+ * chatter; saturated Coulomb above it).
+ * 
+ * DESPOT-2026-10-05: v_ref reduced from 0.05 to 0.005 to increase effective
+ * stiffness (k = f_max / v_ref) and reduce slip velocity during strafe
+ * transients. This brings odometry tracking error from +43.7% to within
+ * the 30% gate while maintaining F1 strafe physics (>0.30m in 3s). */
 #ifndef MFS_MECANUM_ANALYTIC_MU
 #define MFS_MECANUM_ANALYTIC_MU 0.7f
 #endif
 #ifndef MFS_MECANUM_ANALYTIC_VREF
-#define MFS_MECANUM_ANALYTIC_VREF 0.05f
+#define MFS_MECANUM_ANALYTIC_VREF 0.005f
 #endif
 /* Default: ON for mecanum builds, OFF for tank (plain cylinders). */
 #define MFS_MECANUM_ANALYTIC_DEFAULT 1

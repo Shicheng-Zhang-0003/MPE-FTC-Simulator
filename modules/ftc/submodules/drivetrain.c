@@ -538,8 +538,10 @@ static void drivetrain_odometry_update (physics_world *world, ftc_robot *robot, 
         const float wbl = w_rad [2], wbr = w_rad [3];
         v_fwd = ((wfl + wfr + wbl + wbr) * 0.25f) * r;
         v_lat = ((wfl - wfr - wbl + wbr) * 0.25f) * r;
-        /* Mecanum yaw moment arm is (Lx + Lz), not the differential 2*Lx. */
-        yaw_rate = (((-wfl + wfr - wbl + wbr) * 0.25f) * r) / 0.44f;
+        /* Mecanum yaw moment arm is (Lx + Lz) = 0.225 + 0.225 = 0.45 m.
+         * CHASSIS_HALF_X = 0.225, CHASSIS_HALF_Z = 0.225 (robot.c).
+         * Old value 0.44 was an unvalidated approximation. */
+        yaw_rate = (((-wfl + wfr - wbl + wbr) * 0.25f) * r) / 0.45f;
     } else if (robot -> wheel_count >= 2) {
         float wl = 0.0f, wr = 0.0f;
         for (int i = 0; i < robot -> wheel_count; i++) {
