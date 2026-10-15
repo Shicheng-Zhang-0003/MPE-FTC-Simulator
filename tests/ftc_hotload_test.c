@@ -30,7 +30,7 @@
 /* Windows-aware plugin path: pick existing .so/.dll variant. */
 static const char *mpe_pick_plugin (const char *so_path, char *buf, size_t n) {
 #ifdef MPE_OS_WINDOWS
-    /* so_path like "plugins/mpe_capsule.so": try as-is, then .dll variant. */
+    /* plugin resolved via MPE_FTC_PLUGIN or the candidate list below. */
     if (access (so_path, R_OK) == 0)
         return so_path;
     size_t L = strlen (so_path);
@@ -72,12 +72,9 @@ static int finite_world (physics_world *w) {
             !isfinite (rb -> velocity.x) || !isfinite (rb -> velocity.y) || !isfinite (rb -> velocity.z)) {
             return 0;
         }
-    }
-    return 1;
+    } return 1;
 }
-static void setup_world (physics_world *w) {
-    mfs_test_world (w); /* 128 iters + tile floor (see header) */
-}
+static void setup_world (physics_world *w) {mfs_test_world (w); /* 128 iters + tile floor (see header) */}
 /* dlsym'd dynamic API surface (full import: descriptor + fleet + drive) */
 typedef int (*spawn_fn_t) (struct physics_world *, float, float, float, motor_preset_id, ftc_drivetrain_type);
 typedef ftc_robot * (*get_fn_t) (struct physics_world *, int);
@@ -93,7 +90,7 @@ int main (int argc, char **argv) {
     if (!so_env && argc > 1)
         so_env = argv [1];
     char so_buf [1024];
-    const char *so_picked = so_env ? so_env : mpe_pick_plugin ("plugins/mpe_ftc.so", so_buf, sizeof (so_buf));
+    const char *so_picked = so_env ? so_env : mpe_pick_plugin ("ecosystem/mfs/plugins/mpe_ftc.so", so_buf, sizeof (so_buf));
     const char *so = so_picked;
     /* ---- 1. dynamic import through the kernel loader ---- */
     char err [512] = {0};
@@ -126,8 +123,7 @@ int main (int argc, char **argv) {
         CHECK (ftc_fleet_count (&w0) == 0, "empty fleet count is 0");
         CHECK (ftc_fleet_get (&w0, 0) == NULL, "empty fleet get is NULL");
         physics_world_cleanup (&w0);
-    }
-    int s0 = ftc_fleet_spawn (&w1, 0.0f, ftc_robot_rest_height (), 0.0f, MOTOR_GB_5203_26_9, FTC_DRIVETRAIN_MECANUM);
+    } int s0 = ftc_fleet_spawn (&w1, 0.0f, ftc_robot_rest_height (), 0.0f, MOTOR_GB_5203_26_9, FTC_DRIVETRAIN_MECANUM);
     CHECK (s0 == 0, "static fleet spawn index 0");
     CHECK (ftc_fleet_count (&w1) == 1, "static fleet count 1");
     ftc_robot *r1 = ftc_fleet_get (&w1, 0);
@@ -143,8 +139,7 @@ int main (int argc, char **argv) {
             failures++;
             break;
         }
-    }
-    float ex, ey, ez;
+    } float ex, ey, ez;
     ftc_robot_get_position (&w1, r1, &ex, &ey, &ez);
     float dz1 = ex - sx, dz1z = ez - sz;
     float disp1 = sqrtf (dz1 * dz1 + dz1z * dz1z);
@@ -167,8 +162,7 @@ int main (int argc, char **argv) {
             failures++;
             break;
         }
-    }
-    float fx, fy, fz;
+    } float fx, fy, fz;
     ftc_robot_get_position (&w2, r2, &fx, &fy, &fz);
     float dx2 = fx - tx, dz2 = fz - tz;
     float disp2 = sqrtf (dx2 * dx2 + dz2 * dz2);
@@ -182,8 +176,7 @@ int main (int argc, char **argv) {
         print_bits ("pos.y", ey, fy);
         print_bits ("pos.z", ez, fz);
         print_bits ("odom_x", r1 -> odom_x, r2 -> odom_x);
-    }
-    CHECK (same, "static vs dynamic bitwise-identical pose+odometry");
+    } CHECK (same, "static vs dynamic bitwise-identical pose+odometry");
     /* ---- 4. detach lifecycle: torques stop, re-attach works ----
      * NOTE: r2 dangles after detach (the fleet array is freed — same
      * dangling-pointer rule as bodies after physics_world_cleanup), so
@@ -200,15 +193,13 @@ int main (int argc, char **argv) {
             failures++;
             break;
         }
-    }
-    CHECK (finite_world (&w2), "detached world stays finite");
+    } CHECK (finite_world (&w2), "detached world stays finite");
     {
         float gx = w2.bodies [w2chassis].position.x;
         float gz = w2.bodies [w2chassis].position.z;
         float coast = sqrtf ((gx - fx) * (gx - fx) + (gz - fz) * (gz - fz));
         CHECK (coast < 2.0f, "detached robot only coasts (%.4f m, no drive)", coast);
-    }
-    CHECK (physics_world_attach_module (&w2, &mpe_module_desc) >= 0, "re-attach static desc");
+    } CHECK (physics_world_attach_module (&w2, &mpe_module_desc) >= 0, "re-attach static desc");
     CHECK (ftc_fleet_count (&w2) == 0, "re-attached fleet starts empty");
     int s9 = ftc_fleet_spawn (&w2, 5.0f, ftc_robot_rest_height (), 5.0f, MOTOR_GB_5203_26_9, FTC_DRIVETRAIN_TANK);
     CHECK (s9 == 0, "spawn into re-attached fleet");
@@ -239,7 +230,6 @@ int main (int argc, char **argv) {
                  failures);
     } else {
         printf ("FTC HOTLOAD: all green\n");
-    }
-    return failures ? 1 : 0;
+    } return failures ? 1 : 0;
 }
 #endif /* MPE_FTC_HOTLOAD_TEST */

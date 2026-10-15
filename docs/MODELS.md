@@ -147,11 +147,11 @@ Shipped mixer kept. Measured steady-state response of the shipped mixer
 |---|---|---|---|
 | forward +1 | +0.243 | **+1.173** | -0.029 |
 | reverse -1 | -0.240 | **-0.979** | -0.134 |
-| strafe +X | **+0.869** | -0.244 | +0.245 |
+| strafe right (+1) | **-0.771** | +0.077 | -0.043 |
 | rotate +1 | -0.029 | -0.004 | **+0.388** |
 
-Forward leaks 21% laterally and 2.5% into yaw; strafe leaks 28% into forward
-and 28% into yaw (real mecanum cross-talk — the X roller pattern is not
+Forward leaks 21% laterally and 2.5% into yaw; strafe leaks 10% into forward
+and 6% into yaw in this window (real mecanum cross-talk — the X roller pattern is not
 symmetric under a pure lateral command, which is why teams re-zero heading
 against the field mid-strafe). Pinned by `mfs_t_drive_directions`.
 
@@ -237,8 +237,11 @@ Pure encoder forward kinematics, no fusion — honest:
 ```
 v_fwd = mean(w)·R
 v_lat = (FL-FR-BL+BR)/4·R
-yaw   = ((FL-FR+BL-BR)/4·R) / 0.44          (mecanum; 0.44 = Lx+Lz, wheel track)
-yaw   = ((wl-wr)·R) / 0.48                  (tank; 0.48 = 2×0.24 track)
+yaw   = ((FL-FR+BL-BR)/4·R) / (Lx+Lz)       (mecanum; Lx+Lz = wheel track,
+                                            0.37 after the 18-inch resize,
+                                            computed from WHEEL_OFFSET_* —
+                                            never a literal: literals drift)
+yaw   = ((wl-wr)·R) / (2·Lx)                (tank; 0.40 after the resize)
 
 SIGN CONVENTION — read before changing either line. The textbook mecanum
 forward kinematics is v_lat = (-FL+FR+BL-BR)·R/4 and
@@ -249,8 +252,8 @@ z up); this engine's frame is X=right, Y=up, Z=forward, which is LEFT-handed
 vectors (v, F, r) keep their sign and axial vectors (ω, τ) gain one minus sign —
 so v_lat matches the textbook and yaw is its negation. The shipped code had
 the textbook yaw combination unchanged, i.e. yaw was inverted on BOTH
-drivetrains. Arm 0.44 is WHEEL_OFFSET_X (0.24) + WHEEL_OFFSET_Z (0.20); it is
-the WHEEL track, not CHASSIS_HALF_X/Z (0.225), which are the chassis collision
+drivetrains. Arm (Lx+Lz) is WHEEL_OFFSET_X + WHEEL_OFFSET_Z (robot.h); it is
+the WHEEL track, not CHASSIS_HALF_X/Z, which are the chassis collision
 box.
 ```
 
@@ -274,9 +277,12 @@ honestly claimed).
 
 ## 5. Robot assembly (`modules/ftc/submodules/robot.c`)
 
-- Chassis box half (0.225, 0.075, 0.225) m, **8.0 kg** (~18 lb, inside the
-  19.05 kg limit); wheels r = 0.05 m (100 mm class), m = 0.2 kg, offsets
-  X ±0.24 / Z ±0.20 m; rest height 0.18 m (5 mm clearance);
+- Chassis box half (0.17, 0.075, 0.17) m, **8.0 kg** (~18 lb, inside the
+  19.05 kg limit); wheels r = 0.05 m (100 mm class), m = 0.2 kg, stance
+  X ±0.20 / Z ±0.17 m (footprint 0.44 × 0.44, inside the 18 in cube with
+  17 mm margin; wheels 10 mm clear of the box — the old 0.225/0.24 stance
+  overlapped 5 mm and stood 0.52 wide, outside the cube); rest height
+  0.18 m (5 mm clearance);
   `WHEEL_PRELOAD` = 2 mm below touch inside the 10 mm slop (persistent
   contact without positional fight); mass ratio 8/0.2 = **40:1 → tests pin
   128 solver iterations** (engine default 64 cannot converge it).
@@ -304,6 +310,7 @@ gamepad drive, intake + shooter + balls:
 - Balls: r = 21 mm, m = 2.6 g, e = 0.65, μ 0.45/0.35; max 16, carry 3.
   Aero: drag `½·ρ·Cd·A·v²` (Cd 0.47 sphere); Magnus `½·ρ·A·S·ω·r·v`,
   S = 0.1, gate `spin > 10`. No spin decay (declared Module-2 scope).
+  Ball radius is read per-body (BIOBUZZ nectar/pollen are larger).
 - Intake: front-lower roller r25 mm/L200 mm/0.05 kg, P-gain 0.2 cap 0.5 N·m
   about the axle; pickup within `R+r+5 mm` compliance + 2 N pull + entrain
   `0.3·dt` surface velocity (magnitudes are picks).
@@ -322,3 +329,97 @@ conventions (0-rest and -1-rest; linear in transit, 0.05 press gate).
 `MPE_GAMEPAD_DEVICE=disabled` skips hardware silently (headless). `Back`
 resets the **full assembly** (chassis + wheels + rollers + flywheel +
 intake by one delta, velocities zeroed, observers + odometry reset).
+**Brake on no input:** every frame with all three drive axes at rest (or the
+LB+RB e-stop) calls `ftc_robot_set_brake(1)` — motor power = BRAKE, i.e. all
+wheel commands zeroed *and* the regenerative idle brake forced on regardless
+of the analytic-tire hysteresis — so released wheels stop and hold instead of
+running on. Any stick input calls `ftc_robot_set_brake(0)` and resumes drive.
+
+## 8. Fictional intake + arcade ball/bucket league (`submodules/intake.c`, `ftc_fleet.c`)
+
+Stated arcade (fictional) seam over the FTC fleet — nothing touches robot
+mechanics; balls are world bodies and possession lives in `ftc_robot`.
+All deterministic: no transcendentals (fixed-coefficient `det_sin/det_cos`,
+`sqrtf`-only lengths), inert when unused (intake off / nothing staged).
+
+- Balls: same BioBuzz spec (r 21 mm, m 2.6 g, e 0.65, μ 0.45/0.35), 16 max.
+  Scatter on `ftc balls`: three lanes ±0.3 m, rows 0.4 m apart ahead of the
+  robot so a straight drive through the 0.32 m mouth catches ≥ 2.
+- BIOBUZZ league pieces (regulation sizes, `ftc pieces` / default on
+  `ftc spawn`): NECTAR r 45.5 mm (9.1 cm dia, m 26.4 g) and POLLEN r 35.5 mm
+  (7.1 cm dia, m 12.6 g) — same e/μ, mass scaled as r³ from the arcade spec.
+  Staged in three lanes so a lane drive mouths them. Carry slot pitch and
+  flying-ball aero read the **radius from the body** (`half_extensions.x`), so
+  the small-ball league (bodies still r 21 mm) stays bit-identical while the
+  larger pieces fly with their real frontal area.
+- Intake (fictional): capture is a **zone predicate** — any unpossessed
+  dynamic ball whose centre enters the mouth box (FWD 0.34, UP −0.12, half
+  0.16/0.10/0.14 m) and is slow relative to the chassis (`< 1.5 m/s`) becomes
+  kinematic and is possessed. Carrying is kinematic slot-follow (4 max,
+  2r+4 mm spacing across the mouth), so carried balls ride jumps/turns.
+- Launch (fictional): `intake_shoot` frees the oldest carried ball at the
+  muzzle (FWD 0.48, UP 0.12 m — ahead of the chassis CCD bubble that ate
+  ~2–3 m/s on tick 0) with `INTAKE_LAUNCH_SPEED` 9 m/s at
+  `INTAKE_LAUNCH_ELEV_DEG` 50° **world-frame** (yaw-only forward; braking
+  pitch never swings the shot), plus Magnus backspin `INTAKE_LAUNCH_SPIN`
+  15 rad/s about the yaw-projected lateral axis. Aimed variants scale
+  power [0.3, 1.0] (muzzle speed linear, chassis inherited fully, spin
+  proportional) and elevation [20, 80] deg; (1.0, 50°) is the exact legacy
+  path by branch. The stock lob outranges the 3.66 m field and cannot drop
+  into the 1.5 m hive mouths from legal spots at any power (proven by
+  trajectory) — regulation hive play needs soft steep lobs (e.g. 0.65
+  power at 70° from a wall-adjacent spot, gated by `hive_shot`). The
+  predictor previews the last aimed shot (full-power 50° until aimed
+  shots exist).
+- Aero for flying balls: same drag + Magnus formulas as module_1 (see §6),
+  separately owned.
+- Bucket (suspended miniature field): pad 1.6×1.6 m at world `y` with four
+  0.35 m walls flared 20° outward (hardcoded quaternion rolls, `e=0` walls)
+  so a rim strike slides in. Reposition by re-spawning moves the live
+  assembly; `clear` parks parts as `no_collide`. **Scoring is mouth-entry
+  counting**: any dynamic ball whose centre enters the interior volume above
+  the pad scores (no speed gate); scored balls freeze kinematic. Carried
+  balls can't false-score (kinematic at the mouth).
+
+## 9. BIOBUZZ regulation league (`submodules/biobuzz.c`, fleet-integrated)
+
+Regulation geometry + staging per `FTC_SPECS.md` → BIOBUZZ §9/§10; all
+dimensions in SI in `biobuzz.h` with manual citations. Additive: the arcade
+league (§8) is untouched; BIOBUZZ owns a separate 64-slot piece registry so
+arcade behavior is bit-identical.
+
+- **Orientation convention** (documented nominal — manual figures are not
+  machine-readable): origin at field centre, y=0 tile top; −Z audience,
+  +Z scoring/far; −X RED wall, +X BLUE wall. Red garden A1 (−X,−Z corner),
+  blue F6 (+X,+Z); red loading A5, blue F2; 2 flowers on each of the
+  audience/far walls at x=±36 in (nominal stations).
+- **Hive pose:** beam through the pivot (43.95 in) with cells mirrored
+  about it (up +0.30 m / out 9.4 in, down mirrored — cells 18.8 in apart
+  horizontally, manual-exact). Mouth normals at 30° elevation outboard
+  (hardcoded Tilt quats; build-time libm only, never per-tick). Red
+  cellA(−Z) up, blue cellB(+Z) up (§11.1 setup).
+- **Tip events (not a damper solve):** per-tick weight census inside the
+  up-cell interior (cell frame, not world box — cells are tilted):
+  pollen 1.0 + nectar 1.7 ≥ 8.0 fires exactly once (8 pollen / 5 nectar /
+  3+3 all cross; manual "approximately" disclosed). Re-pose teleports the
+  11 static bodies mirrored (statics teleport cleanly, bucket precedent);
+  the tipping load gets a deterministic outboard+down spill nudge, then
+  the walls move away under it. Unlock +1 per own-hive tip; entry is a
+  verb (`biobuzz_enter_nectar` → loading-zone edge), not automatic.
+  Hysteresis is structural (new up-cell starts empty).
+- **Census/scoring (`biobuzz_score`):** flowers bottom-first sort inside
+  the top–middle volume (partial-inside counts); owner = top-most nectar
+  (scores every piece ×2 either colour); bottom-most nectar per colour
+  +5; gardens = resting pieces partially in the rect ×1 for the zone
+  alliance (either colour); up-cell contents ×2 at assess time.
+  Kinematic/static balls never census (carried balls can't score).
+  Leave/park are live predicates (5 mm wall gap / loading-zone overlap);
+  the caller labels AUTO vs TELEOP (no match clock). RP + table values
+  are pure functions pinned by `biobuzz_table`.
+- **Starts:** 2 slots per side touching the own wall (wheel outer + 2 mm),
+  z=±0.35 (clear of loading/garden), yaw ±90° facing centre; rigid yaw
+  of chassis+wheels+rollers + odometry set (`biobuzz_place_robot`).
+- **Honest limits** (see also KNOWN_FAILURES → [BIOBUZZ-LIMITS]): flower
+  wall stations nominal; no AprilTag vision (IDs recorded per cell);
+  tray nectar staged at ground level outside the walls (the 15 mm tile
+  step neglected); no clock/fouls; kinematic (not dynamic) tip.

@@ -27,6 +27,19 @@ extern int mfs_t_stall_endpoint (void);
 extern int mfs_t_intake_stop (void);
 extern int mfs_t_shooter_axis (void);
 extern int mfs_t_ball_spin (void);
+extern int mfs_t_bucket_game (void);
+extern int mfs_t_brake_mode (void);
+extern int mfs_t_shoot_power (void);
+extern int mfs_t_hive_shot (void);
+extern int mfs_t_partial_throttle (void);
+extern int mfs_t_biobuzz_field (void);
+extern int mfs_t_biobuzz_stage (void);
+extern int mfs_t_biobuzz_tip (void);
+extern int mfs_t_biobuzz_flower (void);
+extern int mfs_t_biobuzz_table (void);
+extern int mfs_t_select (void);
+extern int mfs_t_yaw_stability (void);
+extern int mfs_t_fleet_clear (void);
 static const mfs_test_entry_t registry [] = {
     {"teleop", mfs_t_teleop, false},
     {"mecanum", mfs_t_mecanum, false},
@@ -45,14 +58,26 @@ static const mfs_test_entry_t registry [] = {
     {"intake_stop", mfs_t_intake_stop, false},
     {"shooter_axis", mfs_t_shooter_axis, false},
     {"ball_spin", mfs_t_ball_spin, false},
+    {"bucket_game", mfs_t_bucket_game, false},
+    {"brake_mode", mfs_t_brake_mode, false},
+    {"shoot_power", mfs_t_shoot_power, false},
+    {"hive_shot", mfs_t_hive_shot, false},
+    {"partial_throttle", mfs_t_partial_throttle, false},
+    {"biobuzz_field", mfs_t_biobuzz_field, false},
+    {"biobuzz_stage", mfs_t_biobuzz_stage, false},
+    {"biobuzz_tip", mfs_t_biobuzz_tip, false},
+    {"biobuzz_flower", mfs_t_biobuzz_flower, false},
+    {"biobuzz_table", mfs_t_biobuzz_table, false},
+    {"select", mfs_t_select, false},
+    {"yaw_stability", mfs_t_yaw_stability, false},
+    {"fleet_clear", mfs_t_fleet_clear, false},
 };
 int main (int argc, char **argv) {
     if (argc > 1 && strcmp (argv [1], "--list") == 0) {
         printf ("Blocking tests (%zu):\n", sizeof (registry) / sizeof (registry [0]));
         for (size_t i = 0; i < sizeof (registry) / sizeof (registry [0]); i++) {
             printf ("  %s\n", registry [i].name);
-        }
-        return 0;
+        } return 0;
     }
     if (argc > 1 && strcmp (argv [1], "--all") == 0) {
         int total = 0, pass = 0, fail = 0;
@@ -66,10 +91,8 @@ int main (int argc, char **argv) {
             } else {
                 printf ("[FAIL] %s (failures=%d)\n", registry [i].name, rc);
                 fail++;
-            }
-            total++;
-        }
-        printf ("\n=== SUMMARY ===\n");
+            } total++;
+        } printf ("\n=== SUMMARY ===\n");
         printf ("Total: %d\n", total);
         printf ("Pass:  %d\n", pass);
         printf ("Fail:  %d\n", fail);
@@ -84,7 +107,6 @@ int main (int argc, char **argv) {
             int rc = registry [i].fn ();
             return rc > 0 ? 1 : 0;
         }
-    }
-    fprintf (stderr, "Unknown test: %s\n", argv [1]);
+    } fprintf (stderr, "Unknown test: %s\n", argv [1]);
     return 1;
 }

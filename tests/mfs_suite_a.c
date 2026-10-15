@@ -21,9 +21,7 @@ int mfs_t_teleop (void) {
         mfs_drive_tank (robot, 1.0f, 1.0f);
         drivetrain_update (&w, robot, dt);
         physics_world_step (&w, dt);
-        if (!mfs_test_finite (&w)) {
-            fail = 1;
-        }
+        if (!mfs_test_finite (&w)) { fail = 1; }
     }
     if (!fail) {
         float end_x, end_y, end_z;
@@ -39,21 +37,19 @@ int mfs_t_teleop (void) {
             heading = fabsf (
                 atan2f (2.0f * (ch -> orientation.w * ch -> orientation.y + ch -> orientation.x * ch -> orientation.z),
                         1.0f - 2.0f * (ch -> orientation.y * ch -> orientation.y + ch -> orientation.x * ch -> orientation.x)));
-        }
-        MFS_INFO ("disp_xz=%.4f dy=%.4f heading=%.4f", disp_xz, dy, heading);
+        } MFS_INFO ("disp_xz=%.4f dy=%.4f heading=%.4f", disp_xz, dy, heading);
         MFS_CHECK (t_ptr, disp_xz >= 0.5f);
         MFS_CHECK (t_ptr, dy <= 1.0f);
         MFS_CHECK (t_ptr, heading <= 0.3f);
-        if (t_ptr -> failures == 0) {
-            printf ("[PASS] teleop straight drive\n");
-        }
-    }
-    physics_world_cleanup (&w);
+        if (t_ptr -> failures == 0) { printf ("[PASS] teleop straight drive\n"); }
+    } physics_world_cleanup (&w);
     free (robot);
     mfs_test_end (t_ptr);
     return t_ptr -> failures;
-}
-/* mecanum: strafe right >0.3m in +X. */
+} /* mecanum: strafe right >0.3m in -X (the robot's right: forward is +Z,
+ * so facing +Z with up +Y, right is -X. DESPOT-2026-10-12: the mixer used
+ * to send +strafe to +X — the robot's left — while forward stayed
+ * robot-relative; fixed in drivetrain_mecanum, gate mirrored here). */
 int mfs_t_mecanum (void) {
     mfs_test_t t;
     mfs_test_begin (&t, "mecanum");
@@ -71,9 +67,7 @@ int mfs_t_mecanum (void) {
         mfs_drive_mecanum (robot, 0.0f, 1.0f, 0.0f);
         drivetrain_update (&w, robot, dt);
         physics_world_step (&w, dt);
-        if (!mfs_test_finite (&w)) {
-            fail = 1;
-        }
+        if (!mfs_test_finite (&w)) { fail = 1; }
     }
     if (!fail) {
         float end_x, end_y, end_z;
@@ -95,19 +89,13 @@ int mfs_t_mecanum (void) {
          * under-convergence — solver-frontier writeup kept in
          * docs/KNOWN_FAILURES.md). Hard gate now. */
         float lateral_displacement = dx;
-        MFS_CHECK (t_ptr, lateral_displacement >= 0.3f);
-        if (lateral_displacement >= 0.3f) {
-            printf ("[PASS] mecanum strafe in +X (dx=%.4f)\n", dx);
-        } else {
-            printf ("[FAIL][MFS-STRAFE-F1] mecanum strafe dx=%.4f < 0.30\n", dx);
-        }
-    }
-    physics_world_cleanup (&w);
+        MFS_CHECK (t_ptr, lateral_displacement <= -0.3f);
+        if (lateral_displacement <= -0.3f) { printf ("[PASS] mecanum strafe right in -X (dx=%.4f)\n", dx); } else { printf ("[FAIL][MFS-STRAFE-F1] mecanum strafe dx=%.4f > -0.30 (want robot-right -X)\n", dx); }
+    } physics_world_cleanup (&w);
     free (robot);
     mfs_test_end (t_ptr);
     return t_ptr -> failures;
-}
-/* release_settle: drive forward, then release to zero command. The robot
+} /* release_settle: drive forward, then release to zero command. The robot
  * must come to rest (vehicle stops, wheels stop, axles stay aligned).
  * DESPOT-2026-10-04: two live-session defects, both unmeasured by the
  * suite until now —
@@ -145,11 +133,8 @@ int mfs_t_release_settle (void) {
         mfs_drive_mecanum (robot, 1.0f, 0.0f, 0.0f);
         drivetrain_update (&w, robot, dt);
         physics_world_step (&w, dt);
-        if (!mfs_test_finite (&w)) {
-            fail = 1;
-        }
-    }
-    float drive_x = 0, drive_y = 0, drive_z = 0;
+        if (!mfs_test_finite (&w)) { fail = 1; }
+    } float drive_x = 0, drive_y = 0, drive_z = 0;
     mfs_get_pos (&w, robot, &drive_x, &drive_y, &drive_z);
     float drive_disp = sqrtf ((drive_x - start_x) * (drive_x - start_x) + (drive_z - start_z) * (drive_z - start_z));
     MFS_INFO ("drive displacement=%.4f m", drive_disp);
@@ -158,9 +143,7 @@ int mfs_t_release_settle (void) {
         mfs_drive_mecanum (robot, 0.0f, 0.0f, 0.0f);
         drivetrain_update (&w, robot, dt);
         physics_world_step (&w, dt);
-        if (!mfs_test_finite (&w)) {
-            fail = 1;
-        }
+        if (!mfs_test_finite (&w)) { fail = 1; }
     }
     if (!fail) {
         rigidbody *ch = mfs_chassis_or_null (&w, robot);
@@ -176,40 +159,26 @@ int mfs_t_release_settle (void) {
                 if (wi < 0 || wi >= w.body_count) {
                     fail = 1;
                     break;
-                }
-                rigidbody *wh = &w.bodies [wi];
+                } rigidbody *wh = &w.bodies [wi];
                 vector3 ax = wh -> cached_axes [0];
                 float wsp = fabsf (vector3_dot (wh -> angular_velocity, ax));
-                if (wsp > max_wheel) {
-                    max_wheel = wsp;
-                }
+                if (wsp > max_wheel) { max_wheel = wsp; }
                 float dot = vector3_dot (ax, chx);
-                if (dot > 1.0f) {
-                    dot = 1.0f;
-                }
-                if (dot < -1.0f) {
-                    dot = -1.0f;
-                }
+                if (dot > 1.0f) { dot = 1.0f; }
+                if (dot < -1.0f) { dot = -1.0f; }
                 float tilt = acosf (dot) * 57.29578f;
-                if (tilt > max_tilt) {
-                    max_tilt = tilt;
-                }
+                if (tilt > max_tilt) { max_tilt = tilt; }
             }
-        }
-        MFS_INFO ("settle: chassis=%.4f m/s maxwheel=%.2f rad/s maxtilt=%.2f deg", ch_speed, max_wheel, max_tilt);
+        } MFS_INFO ("settle: chassis=%.4f m/s maxwheel=%.2f rad/s maxtilt=%.2f deg", ch_speed, max_wheel, max_tilt);
         MFS_CHECK (t_ptr, ch_speed < 0.1f);
         MFS_CHECK (t_ptr, max_wheel < 2.0f);
         MFS_CHECK (t_ptr, max_tilt < 3.0f);
-        if (t_ptr -> failures == 0) {
-            printf ("[PASS] release settles: vehicle stops, wheels stop, axles aligned\n");
-        }
-    }
-    physics_world_cleanup (&w);
+        if (t_ptr -> failures == 0) { printf ("[PASS] release settles: vehicle stops, wheels stop, axles aligned\n"); }
+    } physics_world_cleanup (&w);
     free (robot);
     mfs_test_end (t_ptr);
     return t_ptr -> failures;
-}
-/* tank: differential turn in place. */
+} /* tank: differential turn in place. */
 int mfs_t_tank (void) {
     mfs_test_t t;
     mfs_test_begin (&t, "tank");
@@ -227,9 +196,7 @@ int mfs_t_tank (void) {
         mfs_drive_tank (robot, 1.0f, -1.0f);
         drivetrain_update (&w, robot, dt);
         physics_world_step (&w, dt);
-        if (!mfs_test_finite (&w)) {
-            fail = 1;
-        }
+        if (!mfs_test_finite (&w)) { fail = 1; }
     }
     if (!fail) {
         float end_x, end_y, end_z;
@@ -243,8 +210,7 @@ int mfs_t_tank (void) {
         if (ch) {
             q = ch -> orientation;
             heading = fabsf (atan2f (2.0f * (q.w * q.y + q.x * q.z), 1.0f - 2.0f * (q.y * q.y + q.x * q.x)));
-        }
-        MFS_INFO ("displacement=%.4f heading=%.4f", disp, heading);
+        } MFS_INFO ("displacement=%.4f heading=%.4f", disp, heading);
         MFS_CHECK (t_ptr, disp <= 0.3f);
         MFS_CHECK (t_ptr, heading >= 0.1f);
         /* DESPOT-2026-09-29: the two gates above are so loose they are almost
@@ -316,16 +282,12 @@ int mfs_t_tank (void) {
          * determinism, not flake). */
         MFS_CHECK_REL (t_ptr, heading, 1.8741f, 0.08f, "tank pivot heading (measured baseline)");
         MFS_CHECK_REL (t_ptr, disp, 0.0642f, 0.20f, "tank pivot translation (measured baseline)");
-        if (t_ptr -> failures == 0) {
-            printf ("[PASS] tank differential turn (disp=%.4f, heading=%.4f)\n", disp, heading);
-        }
-    }
-    physics_world_cleanup (&w);
+        if (t_ptr -> failures == 0) { printf ("[PASS] tank differential turn (disp=%.4f, heading=%.4f)\n", disp, heading); }
+    } physics_world_cleanup (&w);
     free (robot);
     mfs_test_end (t_ptr);
     return t_ptr -> failures;
-}
-/* odometry: forward + strafe accuracy. */
+} /* odometry: forward + strafe accuracy. */
 int mfs_t_odometry (void) {
     mfs_test_t t;
     mfs_test_begin (&t, "odometry");
@@ -416,15 +378,12 @@ int mfs_t_odometry (void) {
             }
         }
     }
-    if (t_ptr -> failures == 0) {
-        printf ("[PASS] odometry tracks physics\n");
-    }
+    if (t_ptr -> failures == 0) { printf ("[PASS] odometry tracks physics\n"); }
     physics_world_cleanup (&w);
     free (robot);
     mfs_test_end (t_ptr);
     return t_ptr -> failures;
-}
-/* ftc_integration: combined drive test. */
+} /* ftc_integration: combined drive test. */
 int mfs_t_ftc_integration (void) {
     mfs_test_t t;
     mfs_test_begin (&t, "ftc_integration");
@@ -437,14 +396,11 @@ int mfs_t_ftc_integration (void) {
     const float dt = 1.0f / 60.0f;
     int fail = 0;
     for (int t_tick = 0; t_tick < 240 && !fail; t_tick++) {
-        if (t_tick < 120) {
-            mfs_drive_mecanum (robot, 1.0f, 0.0f, 0.0f);
-        } else if (t_tick < 180) {
+        if (t_tick < 120) { mfs_drive_mecanum (robot, 1.0f, 0.0f, 0.0f); } else if (t_tick < 180) {
             mfs_drive_tank (robot, 0.5f, -0.5f);
         } else {
             mfs_drive_mecanum (robot, 0.0f, 1.0f, 0.0f);
-        }
-        drivetrain_update (&w, robot, dt);
+        } drivetrain_update (&w, robot, dt);
         physics_world_step (&w, dt);
         if (!mfs_test_finite (&w)) {
             fail = 1;
@@ -459,16 +415,12 @@ int mfs_t_ftc_integration (void) {
         MFS_INFO ("disp_xz=%.4f dy=%.4f", dist, dy);
         MFS_CHECK (t_ptr, dist >= 0.5f);
         MFS_CHECK (t_ptr, dy <= 0.5f);
-        if (t_ptr -> failures == 0) {
-            printf ("[PASS] ftc integration drive\n");
-        }
-    }
-    physics_world_cleanup (&w);
+        if (t_ptr -> failures == 0) { printf ("[PASS] ftc integration drive\n"); }
+    } physics_world_cleanup (&w);
     free (robot);
     mfs_test_end (t_ptr);
     return t_ptr -> failures;
-}
-/* mfs_t_stall_endpoint: GATED locked-rotor torque test.
+} /* mfs_t_stall_endpoint: GATED locked-rotor torque test.
  *
  * DESPOT-2026-09-29 ([MOTOR-III] step 1). This is the test whose absence made
  * the whole motor chain unverifiable.
@@ -507,8 +459,7 @@ int mfs_t_stall_endpoint (void) {
      * few ticks only let the thermal model settle. */
     for (int i = 0; i < 30; i++) {
         motor_update (&m, 0.0f, dt, 12.0f);
-    }
-    MFS_CHECK (t_ptr, isfinite (m.output_torque));
+    } MFS_CHECK (t_ptr, isfinite (m.output_torque));
     MFS_INFO ("locked rotor: output_torque=%.4f N.m (spec %.4f, err %+.2f%%), "
               "current=%.3f A (spec stall 9.2), back_emf=%.4f V",
               m.output_torque, spec_stall_nm, 100.0 * (m.output_torque - spec_stall_nm) / spec_stall_nm, m.current,
@@ -557,8 +508,7 @@ int mfs_t_stall_endpoint (void) {
             mo.wprev_valid = (i > 0) ? 1 : 0;
             motor_update_load (&mo, held_w, dt, 12.0f, axle_I);
             w_prev = held_w;
-        }
-        MFS_CHECK (t_ptr, isfinite (mo.output_torque));
+        } MFS_CHECK (t_ptr, isfinite (mo.output_torque));
         MFS_INFO ("closed loop: output_torque=%.4f N.m (spec %.4f, err %+.2f%%), "
                   "load_torque=%.4f",
                   mo.output_torque, spec_stall_nm, 100.0 * (mo.output_torque - spec_stall_nm) / spec_stall_nm,
@@ -636,13 +586,10 @@ int mfs_t_stall_endpoint (void) {
                            "(observer fidelity, no thermal confound)");
         }
     }
-    if (t_ptr -> failures == 0) {
-        printf ("[PASS] stall endpoint (tau=%.4f vs spec %.4f N.m)\n", m.output_torque, spec_stall_nm);
-    }
+    if (t_ptr -> failures == 0) { printf ("[PASS] stall endpoint (tau=%.4f vs spec %.4f N.m)\n", m.output_torque, spec_stall_nm); }
     mfs_test_end (t_ptr);
     return t_ptr -> failures;
-}
-/* drive_directions: pin the AXIS each pure command actually drives, and pin
+} /* drive_directions: pin the AXIS each pure command actually drives, and pin
  * anti-symmetry under sign reversal.
  *
  * DESPOT-2026-10-02 (the gate that was missing): every existing mecanum gate
@@ -702,14 +649,12 @@ static int mfs_measure_rates (physics_world *w, ftc_robot *robot, float f, float
         drivetrain_mecanum (robot, f, s, r);
         drivetrain_update (w, robot, dt);
         physics_world_step (w, dt);
-    }
-    float px = ch -> position.x, pz = ch -> position.z;
+    } float px = ch -> position.x, pz = ch -> position.z;
     for (int k = 0; k < 180; k++) {
         drivetrain_mecanum (robot, f, s, r);
         drivetrain_update (w, robot, dt);
         physics_world_step (w, dt);
-    }
-    px = ch -> position.x;
+    } px = ch -> position.x;
     pz = ch -> position.z;
     /* DESPOT-2026-10-06 (THIS MEASUREMENT WAS ALIASING -- and that is how a
      * sign-inverted yaw and a 3.7x-overrun pivot both passed this gate).
@@ -736,8 +681,7 @@ static int mfs_measure_rates (physics_world *w, ftc_robot *robot, float f, float
         drivetrain_update (w, robot, dt);
         physics_world_step (w, dt);
         yaw_acc += ch -> angular_velocity.y * dt;
-    }
-    const float span = (float) win * dt;
+    } const float span = (float) win * dt;
     out -> vx = (ch -> position.x - px) / span;
     out -> vz = (ch -> position.z - pz) / span;
     out -> om = yaw_acc / span;
@@ -761,8 +705,7 @@ int mfs_t_drive_directions (void) {
             MFS_CHECK (t_ptr, mfs_measure_rates (&w, robot, 1.0f, 0.0f, 0.0f, &fwd) == 0);
             MFS_CHECK (t_ptr, mfs_measure_rates (&w, robot, -1.0f, 0.0f, 0.0f, &rev) == 0);
             free (robot);
-        }
-        physics_world_cleanup (&w);
+        } physics_world_cleanup (&w);
     }
     /* strafe on a fresh robot (a robot that has been driven is not neutral) */
     {
@@ -774,8 +717,7 @@ int mfs_t_drive_directions (void) {
         if (robot) {
             MFS_CHECK (t_ptr, mfs_measure_rates (&w, robot, 0.0f, 1.0f, 0.0f, &str) == 0);
             free (robot);
-        }
-        physics_world_cleanup (&w);
+        } physics_world_cleanup (&w);
     }
     /* rotate +/- on their own fresh robot each: the first direction's spin-up
      * would otherwise leak into the second measurement */
@@ -788,8 +730,7 @@ int mfs_t_drive_directions (void) {
         if (robot) {
             MFS_CHECK (t_ptr, mfs_measure_rates (&w, robot, 0.0f, 0.0f, 1.0f, &rot_p) == 0);
             free (robot);
-        }
-        physics_world_cleanup (&w);
+        } physics_world_cleanup (&w);
     }
     {
         physics_world w;
@@ -800,10 +741,8 @@ int mfs_t_drive_directions (void) {
         if (robot) {
             MFS_CHECK (t_ptr, mfs_measure_rates (&w, robot, 0.0f, 0.0f, -1.0f, &rot_n) == 0);
             free (robot);
-        }
-        physics_world_cleanup (&w);
-    }
-    MFS_INFO ("fwd  vx=%+.4f vz=%+.4f om=%+.4f", fwd.vx, fwd.vz, fwd.om);
+        } physics_world_cleanup (&w);
+    } MFS_INFO ("fwd  vx=%+.4f vz=%+.4f om=%+.4f", fwd.vx, fwd.vz, fwd.om);
     MFS_INFO ("rev  vx=%+.4f vz=%+.4f om=%+.4f", rev.vx, rev.vz, rev.om);
     MFS_INFO ("str  vx=%+.4f vz=%+.4f om=%+.4f", str.vx, str.vz, str.om);
     MFS_INFO ("rot+ vx=%+.4f vz=%+.4f om=%+.4f", rot_p.vx, rot_p.vz, rot_p.om);
@@ -822,7 +761,9 @@ int mfs_t_drive_directions (void) {
     MFS_CHECK (t_ptr, fabsf (fwd.om) < 0.25f * fabsf (fwd.vz));
     /* 4. Forward/reverse anti-symmetry in magnitude. */
     MFS_CHECK_REL (t_ptr, fabsf (fwd.vz), fabsf (rev.vz), 0.35f, "fwd/rev |vz| antisymmetry");
-    /* 5. Strafe must drive +X and must NOT be a disguised forward.
+    /* 5. Strafe must drive -X (the robot's right: forward +Z, up +Y, so
+     *    right is -X — DESPOT-2026-10-12 mirrored the mixer, which used to
+     *    send +strafe to +X/robot-left) and must NOT be a disguised forward.
      *
      * Ceiling 0.35, set from measurement, not chosen for comfort: a sustained
      * strafe after the drive has been running leaks 28% of the lateral rate
@@ -835,7 +776,7 @@ int mfs_t_drive_directions (void) {
      * command-free settle), so the figure is state dependent; 0.35 holds under
      * both. A transposed mixer fails gate 5 outright (vx -> 0, vz -> 1.1), so
      * the slack here costs no coverage of the failure this test exists for. */
-    MFS_CHECK (t_ptr, str.vx > 0.5f);
+    MFS_CHECK (t_ptr, str.vx < -0.5f);
     MFS_CHECK (t_ptr, fabsf (str.vz) < 0.35f * fabsf (str.vx));
     MFS_CHECK (t_ptr, fabsf (str.om) < 0.35f * fabsf (str.vx));
     /* 6. Rotate must rotate, and mostly about yaw.
@@ -847,9 +788,14 @@ int mfs_t_drive_directions (void) {
      * against a 20 A pack PTC, which integrates (36.8-20)/20 per second and
      * trips in about 1.2 s, after which battery_get_voltage() returns the
      * 1.2 V brownout and the drive nearly stops. Measured steady-state yaw
-     * for the same rotate +1 command: +2.29 rad/s after a command-free
-     * settle on a fresh pack, +0.46 rad/s after 330 ticks of continuous
-     * driving on the same fresh pack. That 5x spread is real pack physics,
+     * for the same rotate +1 command: -4.50 rad/s after a command-free
+     * settle on a fresh pack (DESPOT-2026-10-14: was +2.29, stale twice —
+     * atan2-fold artefact, then the yaw governor capping the ramp; sign
+     * corrected with the fold fix. DESPOT-2026-10-14b: -4.47 -> -4.50
+     * across the 18-inch footprint resize — the cap binds, not the track), +0.46 rad/s after 330 ticks of
+     * continuous driving on the same fresh pack (pre-governor record; the
+     * spread point stands — brownout physics is untouched by the
+     * governor). That 5x spread is real pack physics,
      * not model instability, and gating it would make this test a
      * measurement of battery state wearing a drivetrain's clothes.
      *
@@ -880,9 +826,7 @@ int mfs_t_drive_directions (void) {
      *    (a diode that only ever cuts one way, a latched traction scale)
      *    shows up here as a persistent forward/reverse imbalance. */
     MFS_CHECK_REL (t_ptr, fabsf (fwd.vz), fabsf (rev.vz), 0.35f, "fwd/rev |vz| antisymmetry");
-    if (t_ptr -> failures == 0) {
-        printf ("[PASS] drive axes decouple and reverse anti-symmetrically\n");
-    }
+    if (t_ptr -> failures == 0) { printf ("[PASS] drive axes decouple and reverse anti-symmetrically\n"); }
     mfs_test_end (t_ptr);
     return t_ptr -> failures;
 }
@@ -934,8 +878,7 @@ static int mfs_yaw_case (mfs_test_t *t_ptr, ftc_drivetrain_type ty, float la, fl
             drivetrain_mecanum (robot, 0.0f, 0.0f, la);
             drivetrain_update (&w, robot, dt);
             physics_world_step (&w, dt);
-        }
-        rigidbody *ch = mfs_chassis_or_null (&w, robot);
+        } rigidbody *ch = mfs_chassis_or_null (&w, robot);
         float o0 = robot -> odom_theta;
         float truth = 0.0f;
         for (int k = 0; k < win; k++) {
@@ -944,25 +887,18 @@ static int mfs_yaw_case (mfs_test_t *t_ptr, ftc_drivetrain_type ty, float la, fl
             physics_world_step (&w, dt);
             if (ch)
                 truth += ch -> angular_velocity.y * dt;
-        }
-        float odom = robot -> odom_theta - o0;
+        } float odom = robot -> odom_theta - o0;
         MFS_INFO ("%s: true=%+.4f rad odom=%+.4f rad  (%.1f s window)", label, truth, odom,
                   (float) win * dt);
         /* SIGN: the load-bearing gate. Zero-on-both-sides is not a failure of
          * this assertion (a dead drivetrain), so require real motion first. */
-        if (fabsf (truth) < 1e-4f) {
-            MFS_INFO ("%s: chassis did not rotate; sign check not applicable", label);
-        } else {
-            MFS_CHECK (t_ptr, (truth > 0.0f) == (odom > 0.0f));
-        }
+        if (fabsf (truth) < 1e-4f) { MFS_INFO ("%s: chassis did not rotate; sign check not applicable", label); } else { MFS_CHECK (t_ptr, (truth > 0.0f) == (odom > 0.0f)); }
         if (ty == FTC_DRIVETRAIN_TANK) {
             /* Tank pivot is stable, so magnitude is honest to gate. Reported
              * band is deliberately wide (60%): odometry is pure encoder
              * kinematics and a pivot slips, but a correct arm lands well
              * inside this and the sign bug lands outside it entirely. */
-            if (fabsf (truth) > 1e-4f) {
-                MFS_CHECK_REL (t_ptr, fabsf (odom), fabsf (truth), 0.60f, "tank odom yaw magnitude");
-            }
+            if (fabsf (truth) > 1e-4f) { MFS_CHECK_REL (t_ptr, fabsf (odom), fabsf (truth), 0.60f, "tank odom yaw magnitude"); }
         } else if (fabsf (truth) > 1e-4f) {
             float err = fabsf (odom - truth) / fabsf (truth);
             if (err > 0.30f) {
@@ -980,8 +916,7 @@ static int mfs_yaw_case (mfs_test_t *t_ptr, ftc_drivetrain_type ty, float la, fl
         MFS_CHECK (t_ptr, robot -> clamp_events >= 0);
         (void) lb;
         rc = 0;
-    }
-    physics_world_cleanup (&w);
+    } physics_world_cleanup (&w);
     free (robot);
     return rc;
 }
@@ -1021,8 +956,7 @@ int mfs_t_odometry_yaw (void) {
         MFS_INFO ("engine frame handedness: dot(X x Y, Z) = %+.0f -> %s", align,
                   align < 0.0f ? "LEFT-handed" : "RIGHT-handed");
         MFS_CHECK (t_ptr, align < 0.0f);
-    }
-    mfs_yaw_case (t_ptr, FTC_DRIVETRAIN_MECANUM, 1.0f, 0.0f, "mecanum rotate +1");
+    } mfs_yaw_case (t_ptr, FTC_DRIVETRAIN_MECANUM, 1.0f, 0.0f, "mecanum rotate +1");
     mfs_yaw_case (t_ptr, FTC_DRIVETRAIN_MECANUM, -1.0f, 0.0f, "mecanum rotate -1");
     /* Tank pivot, both directions, through the real tank mixer. */
     {
@@ -1039,8 +973,7 @@ int mfs_t_odometry_yaw (void) {
                     drivetrain_tank (robot, l, -l);
                     drivetrain_update (&w, robot, dt);
                     physics_world_step (&w, dt);
-                }
-                rigidbody *ch = mfs_chassis_or_null (&w, robot);
+                } rigidbody *ch = mfs_chassis_or_null (&w, robot);
                 float o0 = robot -> odom_theta;
                 float truth = 0.0f;
                 const int win = 40;
@@ -1050,23 +983,33 @@ int mfs_t_odometry_yaw (void) {
                     physics_world_step (&w, dt);
                     if (ch)
                         truth += ch -> angular_velocity.y * dt;
+                } float odom = robot -> odom_theta - o0;
+                /* DESPOT-2026-10-12 (ABUSE-TILT fallout, test bug): odom_theta
+                 * is WRAPPED to [-pi,pi] every tick (see drivetrain.c), while
+                 * truth above is an unwrapped running sum. Once the pivot got
+                 * clean enough to accumulate past +pi inside the 40-tick
+                 * window, this raw difference read -5.5 for a true +0.8
+                 * (wrap artifact, not physics — sign flip plus 21x). Take
+                 * the wrapped delta so the comparison is in the same space. */
+                {
+                    const float pi = 3.14159265358979323846f;
+                    const float two_pi = 6.28318530717958647692f;
+                    float wd = fmodf (odom + pi, two_pi);
+                    if (wd < 0.0f)
+                        wd += two_pi;
+                    odom = wd - pi;
                 }
-                float odom = robot -> odom_theta - o0;
                 MFS_INFO ("tank L%+.1f R%+.1f: true=%+.4f rad odom=%+.4f rad", l, -l, truth, odom);
                 if (fabsf (truth) > 1e-4f) {
                     MFS_CHECK (t_ptr, (truth > 0.0f) == (odom > 0.0f));
                     MFS_CHECK_REL (t_ptr, fabsf (odom), fabsf (truth), 0.60f, "tank odom yaw magnitude");
-                }
-                MFS_CHECK (t_ptr, robot -> odom_slip == 0 || robot -> odom_slip == 1);
+                } MFS_CHECK (t_ptr, robot -> odom_slip == 0 || robot -> odom_slip == 1);
                 MFS_CHECK (t_ptr, robot -> clamp_events >= 0);
-            }
-            physics_world_cleanup (&w);
+            } physics_world_cleanup (&w);
             free (robot);
         }
     }
-    if (t_ptr -> failures == 0) {
-        printf ("[PASS] odometry yaw sign agrees with chassis on both drivetrains\n");
-    }
+    if (t_ptr -> failures == 0) { printf ("[PASS] odometry yaw sign agrees with chassis on both drivetrains\n"); }
     mfs_test_end (t_ptr);
     return t_ptr -> failures;
 }

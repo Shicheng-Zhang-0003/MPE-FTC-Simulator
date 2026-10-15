@@ -4,8 +4,31 @@
 #include "motor.h"
 #include "motor_presets.h"
 #include "battery.h"
+#include "intake.h"
 #include "core/physics_world.h"
 #define FTC_MAX_WHEELS 8
+/* Robot dimensions (metres). Single source of truth — robot.c (builder),
+ * drivetrain.c (odometry yaw arms) and biobuzz.c (start poses) all read
+ * these; no TU keeps a private copy (that is how the 0.44->0.45 arm drift
+ * happened once). Regulation target: the whole footprint fits the FTC
+ * 18 in (0.4572 m) starting cube with margin. */
+#define CHASSIS_HALF_X 0.17f
+#define CHASSIS_HALF_Y 0.075f
+#define CHASSIS_HALF_Z 0.17f
+#define CHASSIS_MASS 8.0f /* ~18 lb robot */
+#define WHEEL_RADIUS 0.05f /* 100mm wheels */
+#define WHEEL_MASS 0.2f
+#define WHEEL_HALF_WIDTH 0.02f /* 40mm wide wheels */
+#define WHEEL_OFFSET_X 0.20f /* wheel-centre stance: outer edge 0.22, 10 mm
+                              * clear of the chassis (zero interpenetration;
+                              * the old 0.24 overlapped the box 5 mm) and
+                              * 17 mm inside the 18 in cube */
+#define WHEEL_OFFSET_Z 0.17f
+#define WHEEL_Y_OFFSET                                                                                                 \
+    (-CHASSIS_HALF_Y - WHEEL_RADIUS -                                                                                  \
+     0.005f) /* MFS_PORT_V15S: 5mm ground clearance. The old +0.01f tucked wheel tops 10mm INSIDE the chassis box, so the contact solver fought the joint-held pose every tick (sinking, chatter, pitch-unload). Joints hold anchors, not volumes — interpenetrating rest poses are solver poison. */
+#define WHEEL_PRELOAD                                                                                                  \
+    0.002f /* MFS_PORT_V15S: joint anchors sit 2mm BELOW exact touch so P2P preloads wheels into persistent floor contact. Inside slop (10mm): no positional fight, but the manifold never grazes out to a hover-skid (which starves odometry). Real suspensions run droop/preload the same way. */
 /* MFS_DRIVETRAIN_TYPE: explicit wheel/traction model selection. */
 typedef enum { FTC_DRIVETRAIN_MECANUM = 0, FTC_DRIVETRAIN_TANK = 1 } ftc_drivetrain_type;
 typedef struct {
@@ -76,6 +99,10 @@ typedef struct {
      * forever (kinetic friction alone can never re-capture a wheel whose
      * stall torque exceeds the kinetic cone). */
     float wheel_traction_scale [FTC_MAX_WHEELS];
+    /* Traction-cut debounce (DESPOT-2026-10-14): consecutive ticks with
+     * overspeed past the slam line. The slam needs SUSTAINED burnout, not
+     * a breakaway transient. Zero-init via memset; memcpy-safe. */
+    int wheel_cut_hold [FTC_MAX_WHEELS];
     /* DESPOT-FIX (torque slew state): previously applied axle torque per
      * wheel (N.m). The driver feathers standing starts in reality (ESC
      * current-slew limits); a 0->stall step in one tick outruns the
@@ -97,6 +124,22 @@ typedef struct {
      * on free revolute bearings) for forensics. Tank robots always read
      * false: plain cylinders, engine friction only. */
     bool mecanum_analytic;
+    /* Fictional intake (arcade league, see submodules/intake.h): possession
+     * lives here so it rides with the robot (memcpy-safe plain ints, zero
+     * is off-and-empty — create() memsets, so drive behavior with the
+     * intake off is bit-identical to before). Balls themselves are world
+     * bodies owned by whoever spawned them (fleet game state); these are
+     * body ids into that registry. */
+    int intake_on;
+    int intake_balls [INTAKE_MAX_CARRIED];
+    int intake_count;
+    /* BRAKE mode (gamepad maps "no stick input" to this): motor power is
+     * BRAKE — every wheel commanded 0 and the regenerative idle brake is
+     * forced on regardless of the analytic tire hysteresis, so released
+     * wheels decelerate to an exact stop and hold (they do not coast or
+     * creep while the driver's hands are off). Zero-init off; driving code
+     * that never sets it is bit-identical. */
+    int brake;
 } ftc_robot;
 /* MFS-STRAFE-A analytic constants (shared with drivetrain.c): slide
  * coefficient for roller-axle slip on tile (wheel-rubber kinetic class;
@@ -129,7 +172,7 @@ typedef struct {
  * it. The cause is structural -- see [MECANUM-PIVOT] in
  * docs/KNOWN_FAILURES.md. */
 #ifndef MFS_MECANUM_ANALYTIC_MU
-#define MFS_MECANUM_ANALYTIC_MU 0.7f
+#define MFS_MECANUM_ANALYTIC_MU 0.9f
 #endif
 #ifndef MFS_MECANUM_ANALYTIC_VREF
 #define MFS_MECANUM_ANALYTIC_VREF 0.005f
@@ -174,6 +217,9 @@ int ftc_world_setup_field (physics_world *world, float mus, float muk);
 void ftc_robot_update (physics_world *world, ftc_robot *robot, float dt);
 /* Set wheel motor commands (-1..1). */
 void ftc_robot_set_wheel_commands (ftc_robot *robot, const float *commands, int count);
+/* BRAKE: command every wheel to 0 and force the regenerative idle brake
+ * (motor power = BRAKE; on=1 engages, 0 resumes normal drive). */
+void ftc_robot_set_brake (ftc_robot *robot, int on);
 /* Get the chassis body's position (for validation). */
 void ftc_robot_get_position (physics_world *world, ftc_robot *robot, float *px, float *py, float *pz);
 #endif /* robot_h */

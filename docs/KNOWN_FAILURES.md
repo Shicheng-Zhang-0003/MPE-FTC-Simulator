@@ -4,6 +4,35 @@ Defects and limits that are measured, ticketed, and NOT hidden by gates.
 Suite marks are XFAIL (loud + ticketed) or documented observations — never
 silent passes. Measurements from the 2026-09-26 audit on this tree.
 
+## [CCD-OBSTACLE-MARGIN] Tank suite red: heading, pivot and odometry yaw (OPEN, regression)
+
+- **Status 2026-10-09: the MFS suite is 14/17.** `tank`, `drive_directions`
+  and `odometry_yaw` are red. This is the current truth; any document saying
+  "15/15 green" describes an earlier tree.
+- **Root cause:** commit `41bcc0b` introduced a **global** CCD obstacle
+  margin. It is applied to every swept pair rather than per colliding pair,
+  so it perturbs motion that never touches an obstacle. The failing gates are
+  all heading/yaw magnitudes, i.e. rotational perturbation — consistent with
+  an over-large margin on a pivoting chassis.
+- **Measured failures:** `tank` pivot heading 1.318356 vs 1.874100 (rel 0.08)
+  and pivot translation 0.091524 vs 0.064200 (rel 0.20);
+  `drive_directions` `fabs(rot_p.vz) < 0.15` unsatisfied; `odometry_yaw` tank
+  yaw magnitude 0.461179 vs 0.282539 and 0.432977 vs 0.255088 (rel 0.60).
+- **Proof of attribution:** zeroing the global obstacle margin restores
+  **17/17**. The candidate fix is a per-pair margin (scale the margin by the
+  actual contact geometry instead of applying one constant everywhere).
+- **Harness note (fixed 2026-10-09):** `build_tests.sh` ran under
+  `set -euo pipefail` and invoked the suite one line *above* `suite_rc=$?`, so
+  a single failing test aborted the script before it could print
+  `Total/Pass/Fail`, scan for sanitizer errors, or emit
+  `FTC RESULT: gated pass=.. fail=..`. A red suite therefore produced **no
+  counts at all**, and the runner reported the missing summary as a contract
+  violation — blaming the harness instead of naming the three failing tests.
+  Errexit is now scoped off around the suite run.
+- **Not caused by** the 2026-10-09 engine diagnostics work: the numbers above
+  are unchanged by it, and reproducing from a pristine `HEAD` worktree gives
+  the identical output.
+
 ## [MFS-STRAFE-F1] Mecanum strafe did not transmit (FIXED 2026-09-28)
 
 - **Was:** pure strafe developed ~0.01 m in 3 s vs 0.30 m gated
@@ -22,8 +51,11 @@ silent passes. Measurements from the 2026-09-26 audit on this tree.
   Analytic-mode hubs ship zero isotropic friction so engine contact
   supplies the normal only: a single tangential model, never
   double-counted past the cone.
-- **Measured (128 iters, tile floor):** strafe +X 3.40 m / -X 3.66 m in
-  3 s (gate 0.30 m); mecanum forward 2.52 m, reverse 3.09 m; diagonal
+- **Measured (128 iters, tile floor):** strafe right (−X) ≈3.40 m /
+  +X ≈3.66 m in 3 s for commands +1/−1 (DESPOT-2026-10-12: directions swapped
+  with the mixer fix — pre-fix these read +X/−X; magnitudes re-pinned by the
+  suite at dx=−2.2282 vs +2.1596 pre, within chaotic noise); mecanum forward
+  2.52 m, reverse 3.09 m; diagonal
   (0.5, 0.5) → (1.19, 1.20) m; yaw in strafe <= 0.13 rad; iteration sweep
   64–512 flat at 3.40–3.64 m. Suite hard-gates F1 now.
 - **Approaches measured and parked:** (b) wheel-level anisotropic rail
@@ -196,6 +228,16 @@ fabricated-tank-target failure retracted on 2026-09-29.
 This is the blocker for [MOTOR-I]/[MOTOR-II], and fixing it revealed a second
 problem. Recorded 2026-09-29.
 
+> DESPOT-2026-10-14 status note (read first): the free-speed observer-armed
+> number quoted anywhere as "-61.3% limit cycle" is RETIRED for the
+> free-speed rig — with the Q-filter (first-order lag, TAU = 5 ticks, on
+> the differenced observation) the armed rig converges to the no-load line
+> at -0.33% (mean -0.03% over ticks 600-1200), and `odometry_yaw` went red
+> green on the same change. What follows is UNTOUCHED by that fix: the
+> shaping-vs-raw gap below is quasi-steady (passes straight through any
+> low-pass), and the jointed-plant air-spin claim lives in its own entry.
+> Do not conflate them.
+
 - **Defect:** the observer computes
   `tau_L = I*(w - w_prev)/dt - tau_exp_prev`, and `tau_exp_prev` is the RAW
   unshaped `Kt*I*gear*eff` (`motor.c:228`). The torque actually delivered is
@@ -229,6 +271,76 @@ problem. Recorded 2026-09-29.
   braking term. Only then should the correct motor model from [MOTOR-II] be
   re-applied; doing it in the other order destabilises the stall endpoint, and
   doing both at once zeroes drive entirely (measured: strafe transmit 0.00 m).
+
+## [OBSERVER-Q] Unfiltered disturbance observation was bang-bang (FIXED 2026-10-14)
+
+**Defect:** `motor_observe()` published raw 60 Hz differencing
+(`I*dw/dt - tau_exp`) with no low-pass. Every per-tick speed ripple
+(joint impulses, clamp steps, quantization) returned next tick as a
+phantom INERTIA-scale load; the implicit solve slammed back. Measured on
+the isolated free-speed rig (observer armed, as `robot.c`): ±stall
+current alternation, shaft swinging ±200 rad/s around a 92 rpm mean
+(-61.3% off the 237.87 no-load line). Textbook DOBs carry a Q-filter;
+this one had none.
+
+**Fix:** first-order lag on the observation (TAU = 5 ticks, alpha 1/6) in
+`motor_observe()`; the implicit solve and the blocked-rotor gate consume
+the filtered value (the gate's definitional override stays immediate).
+New state `load_torque_filt` (zero-init; `motor_reset_observer` clears
+it). Measured: armed rig converges to -0.33% (mean -0.03%), currents stay
+within ±1.5 A, and `odometry_yaw` (red on yaw magnitude) went green on
+the same change with nothing else touched.
+
+**Blast radius, adjudicated (not asserted):** `tank` moved (2.37→2.78
+heading, 0.043→0.118 translation) and stays RED — it was red, it is red,
+no baseline touched. `partial_throttle` and `bucket_game` went red
+because their numbers encoded chatter-era interaction (18x charge per
+meter; identical-saturation crawl now reads honestly) — re-derived with
+cause chains in their gate comments, not re-baselined. The traction-cut
+latch the filter exposed is documented below.
+
+## [CUT-LATCH] Traction-cut recovery cannot fire under smooth signals (BOUNDED 2026-10-14)
+
+**Defect:** recovery needs `over < 2.0`, but cut torque itself sustains
+the spin it condemns (wheels hold 5-7 rad/s on 0.15 torque while the
+chassis crawls), so `over` never dips: measured bit-identical 0.690 m
+trajectories at cmd 0.25 and 0.50 (cone-saturated sliding crawl).
+Pre-filter chatter accidentally pumped recovery (oscillation dipped
+`over` regularly). A 3-tick debounce of the slam was tried and REVERTED
+with cause: it broke `drive_directions` cross-talk and heading hold —
+slam immediacy is load-bearing for directional purity.
+
+**Bounded (not solved):** a 20-tick probe (`+0.2` regardless, re-slam on
+genuine burnout) guarantees escape without touching slam immediacy.
+Genuine burnout sees 1/20 probe duty. The cone-saturation identity itself
+(flooring it on ice gives the same slide) is honest plant physics, and
+`partial_throttle` now gates saturation-tolerant laws (capability at
+every command, ordered endpoints) instead of a false strict monotone.
+
+## [MOTOR-PARTIAL] Off-full-throttle driven-path limit cycle (FIXED 2026-10-12)
+Distinct from [MOTOR-III] (the observer still books shaping as load; that deeper
+coupling is untouched). This was a **clamp-domain bug** in `motor_update_load`:
+
+- **Symptom:** driving straight with a *partial* stick (live "robot twitches while
+  driving forward"). Measured single-driven on the MFS rig: cmd=0.25/0.35/0.5
+  netted the robot **BACKWARD** (displacement −0.10/−0.36/−0.21 m over 8 s) with
+  yaw-rate std up to 0.39 rad/s; wheel 0 alternated +230/−125 rpm every tick and
+  the delivered torque slammed between −1.8 and +stall. cmd=1.0 was perfectly
+  clean (dist 7.93 m, std 0.059).
+- **Cause:** the implicit solve's predicted-speed clamp used the **BUS** voltage,
+  i.e. the no-load point at FULL throttle w_free = V_term/(kv·gear), at *every*
+  command. At |command|<1 the true applied voltage — hence the true powered
+  no-load ceiling — is V_term·|command|, so the clamp let the solve over-predict
+  `w_end` toward a ceiling up to 2× too high; the inflated back-EMF then drove a
+  braking slam the next tick, a positive-feedback limit cycle that could only
+  exist off full throttle (bus·1 == bus, so full command was bit-identical).
+- **Fix:** clamp to `|V_applied|/(kv·gear)` (`motor.c`). The one-sided guard
+  (never clamp below |w_measured|, preserving regen braking authority) is kept.
+  Full-command behaviour is unchanged by construction; partial throttle now
+  drives forward monotonically (0.25→0.69 m, 0.5→2.08 m, 0.75→4.06 m; yaw-rate
+  std ≤ 0.002 rad/s).
+- Locked by the `partial_throttle` gate (finite + std<0.02 + forward + monotone;
+  confirmed red on the pre-fix tree).
 
 ## [RELEASE-STORM] Zero-command motor limit cycle + glide equilibrium (FIXED 2026-10-04)
 
@@ -273,7 +385,136 @@ retracted measurement (honesty first):
   tau_exp_prev now (stale drive reference poisoned post-idle re-drive:
   measured strafe 10x dead until the handshake).
 
-## [ABUSE-TILT] Sustained harsh mixed drive walks axles to flip (OPEN frontier, pre-existing)
+## [ABUSE-TILT] Sustained harsh mixed drive walks axles to flip (FIXED 2026-10-12)
+
+Was OPEN frontier, pre-existing. Now: sustained full triple-command
+(0.5 fwd + 0.5 strafe + 0.3 rotate) holds ≤2° for 900 ticks with transient
+spikes ≤10° that recover, and a 600-tick abuse + 600-tick release ends at
+0.05° on all wheels (was: 5° → 69° → 180° frozen-in-tilt by ~240 ticks).
+Single-mode bursts stay ≤1.4° as before. Pure rotate (±1 sustained, the
+harshest yaw case) creeps to ~7° over 1200 ticks, still recovering — bounded,
+not flipped. Live symptom cured: both-sticks driving no longer snaps shafts.
+
+Root causes, both measured per-tick per solver stage on a headless
+fleet-identical probe (temp/tilt_abuse.c, retained in temp/ only):
+
+1. **Rolling-resistance spin-decay strips hinge co-rotation (the pump).**
+   Stage trace (relperp wheel-vs-chassis): post-loop 0.00 → post-relax 0.00
+   → post-rolling 0.92. `collision_apply_rolling_resistance` decays spin
+   about the contact normal and cannot distinguish rigid co-rotation from
+   slip — on a hinge-driven wheel it deletes the co-yaw the joint just gave
+   it (measured -0.90 → -0.38 in one pass). The chassis keeps yawing, the
+   wheel does not follow, integration bakes the difference into hinge tilt
+   at exactly the chassis yaw rate (0.675°/tick vs 0.7 rad/s chassis).
+   Single-stick drive yaws ~nothing, so nothing walks; combined drive yaws
+   continuously, so axles walk to flip.
+2. **Axis-drift correction was dead on arrival (no recovery).** Drift injects
+   beta*err/dt corrective velocity pre-Poisson; the very next joint solve
+   kills ALL perp relative velocity including the correction (measured 1.5
+   rad/s injected at 14° tilt, 0.001 surviving). Orientation error therefore
+   never decayed — the corrector existed only on paper.
+3. **Accomplice (not root, RETIRED 2026-10-14): parasitic CHASS-WHEEL contact.** Wheel rim
+   x-footprint overlaps the chassis box edge by ~5 mm with 5 mm vertical
+   clearance inside 10 mm slop, so a slop-admitted manifold exists from tick
+   0 (Nimp 0.08 at 0.6° tilt, 0.52 at 13°) and wedges harder as tilt grows.
+   Secondary: it only matters once tilt exists. Geometry untouched (moving
+   the track retunes odometry arms + mixer + every drive gate — budgeted
+   follow-up, not this fix). DESPOT-2026-10-14: the budgeted follow-up
+   LANDED (18-inch footprint resize: chassis 0.34, stance 0.40/0.34,
+   wheels 10 mm clear of the box — zero interpenetration by construction).
+   This accomplice is gone; the root-cause fix above stands on its own.
+
+Fix (core/physics_world.c + simulation_physics_loop.c, mirrored):
+joints re-equalize after the relaxation passes AND after rolling (velocity
+only, no drift, no pre-step — joints get the final word over every
+velocity-touching stage), and drift relocated end-of-step so its correction
+survives into integration (still once per tick, never in-loop: the
+pendulum-9x rule stands). Hinge-parallel spin rolling legitimately removes
+is untouched by axis/P2P rows. No formulation change to any row, no new
+bias, no retune: engine quick 59/59 all regimes, physics 104/105 (sole red
+the pre-existing legacy-f11_torture), tui-smoke green.
+
+Collateral, all measured pre/post on identical harnesses:
+- drive_directions red → GREEN (spurious rotate vz-coupling gone: tighter
+  joints stop feeding yaw into translation).
+- physics_truth silent coast failure → GREEN: the failure was a vacuous
+  X-velocity gate (tank travels +Z; X held 4th-decimal jitter in both
+  trees) exposed by jitter drift, not physics — Z-coast truth is identical
+  both trees (1.27 → 0.00, stops dead ~0.2 m). Gate now on planar speed
+  with a vacuity floor and printed values.
+- odometry_yaw tank: sign-flip artifact cured (odom_theta is wrapped to
+  [-pi,pi]; the test differenced across a wrap once the pivot got fast
+  enough — wrap-aware delta now; same sign both directions). Magnitude
+  still red (2.9x vs 1.6x pre): faster rigid pivot peels more; stays open
+  beside the MECANUM-PIVOT frontier below.
+- tank pivot values moved (heading 1.32 → 2.37, disp 0.0915 → 0.0434):
+  pre-fix pivot stuttered on joint churn (±47 rad/s wheel chatter, 2-8°
+  tilts); post-fix it pivots smooth and rigid (spins ±3, tilts 0.4°,
+  slip-free odometry until wrap). NOT re-baselined here: tank is red in
+  the CCD-margin era either way, and baselines are blessed on green, not
+  on red. Re-baseline rides with the margin fix.
+- Residual: slow creep under hundreds of ticks of uninterrupted full
+  triple-command (rim-wedging feedback, see accomplice above), fully
+  recovered on release. Realistic driving (modulated sticks + releases)
+  never accumulates: see the 0.05° release number.
+
+## [SKATE] Combined-drive slide + weakest-wheel cut-trap (PARTIAL 2026-10-12)
+
+Live report that surfaced once flips were gone: under both-sticks
+(asymmetric) commands the robot pirouettes/slides instead of tracking
+(single-stick modes track fine). Headless fleet-identical probes
+(temp/tilt_grip.c, temp/tilt_glide.c, temp/tilt_tank.c; temp-only):
+combined (0.5,0.5,0.3) holds all wheels saturated (slip 0.6-1.2 m/s ≫
+VREF 5 mm/s, analytic at full 15.1 N cone) yet the chassis spins in place
+instead of translating — and the weakest wheel (FR, +0.23 cmd) ends up
+spinning BACKWARD (-11 to -15 mean) with its thrust flipped.
+
+- **Cut-trap mechanism (measured, fixed):** traction cut slams to 0.15 on
+  overspeed>4 and climbs back +0.2/tick below 2.0 — but on a 2.5e-4
+  featherweight wheel even strangled torque peels in one tick, so spool
+  attempts re-slam faster than the climb recovers: FR pinned at 0.15 from
+  tick 40 with scale mean 0.45, contributing nothing while drag back-drives
+  it. A slow wheel is stuck, not peeling, so the cut now releases outright
+  below 2 rad/s (slew still feathers delivery, genuine overspeed re-slams
+  next tick; tank pivots spin fast, idle bypasses, standstill starts at 1
+  — the load-bearing slam regimes never touch the slow case). Unpins scale
+  (0.45 → 0.74 on FR); tank headline maneuver bit-identical (2.3728/
+  0.0434 to 4 decimals), drive_directions stays green.
+- **Back-drive lock (OPEN):** with the cut released the motor still cannot
+  recover FR (delivery 0.74 → 1.00, spin unchanged at -11.5). A back-drive
+  bypass (full authority whenever spin opposes command) was tried and
+  REVERTED for zero benefit — which pointed at the plan, not the cut: the
+  implicit solve evaluates current at PLANNED speed (w_end ≈ target, where
+  back-EMF ≈ applied voltage and current ≈ trickle) instead of MEASURED
+  speed (far away, back-EMF screaming, stall current available). Far from
+  target at low command voltage the model therefore plans holding torque,
+  never recovery torque — recovery is structurally unavailable no matter
+  what the cut passes through. Fixing that is the MOTOR-II landing unit
+  (observer/planner rework with stall-endpoint re-validation), not a cut
+  tweak. Bounded today: at most the dragged wheel flips thrust, mounts/P2P
+  hold, nothing NaNs, release recovers to 0.05°.
+- **Determinism note:** same binary twice and rebuild-twice from identical
+  sources are bit-identical (incl. chaotic pivot windows); the pivot regime
+  itself is chaotic-sensitive (tiny formulation changes move late-window
+  truth), which is why baselines here are regression bands, not oracles.
+- **BR lockup (intermittent, analyzed):** never reproduced sustained in
+  1200+ modulated ticks (longest stall-like run 1-3 ticks), but the
+  mechanism is on record: peel bursts fling wheels to 4x free speed
+  (measured peaks 100-116 rad/s, overspeed 36-47% of the time), the
+  governor diode then zeroes drive torque, and static grip grabs the wheel
+  to ~0 — the grab dwell reads as lockup. Design (over-torqued plant +
+  bang regulators), induced by peel: finer slew (0.6 -> 0.2) was tried for
+  the chatter and REVERTED (worst burst 116 -> 77 but overspeed fraction
+  unchanged 0.36 -> 0.37 — bursts are contact stick-slip snaps on
+  featherweight wheels, offset-contact normal torques up to ~28 rad/s per
+  tick at 3° tilt, not motor steps, so delivery granularity cannot calm
+  them; meanwhile drive authority starved: drive_directions fwd/str red,
+  tank blown further to 3.04/0.127, heavy-regime ftc_ecosystem red).
+  The 0.6 step reaching stall in ~7 ticks stays load-bearing for launches.
+
+Original record preserved below (it earned its keep: six negatives that
+must not be re-attempted blind, and the authorities cross-ref that
+pointed at joint authority in the first place).
 
 Recorded 2026-10-04. Sibling of the fixed items above, NOT fixed: ~90+
 ticks of sustained full mixed drive (0.5 fwd + 0.5 strafe + 0.3 rotate)
@@ -378,7 +619,7 @@ an unrelated question exposed this, and the first conclusion drawn from it was
   so a short-horizon displacement average measures the spin-up ramp, not the
   drivetrain.
 - **`mfs_t_drive_directions` added** to close the gap. It pins axis dominance
-  (forward→+Z, strafe→+X, rotate→yaw), cross-talk ceilings, and — the gate
+  (forward→+Z, strafe→−X/robot-right, rotate→yaw), cross-talk ceilings, and — the gate
   that would have caught the sign question — that `rotate` and its reverse
   produce **opposite yaw signs**. Suite 12 → 13.
 
@@ -1484,6 +1725,15 @@ findable with a standalone probe.
 
 ## [MECANUM-PIVOT] Mecanum pivot yaw runs ~3.5x past the kinematic ceiling (OPEN, pre-existing)
 
+> DESPOT-2026-10-14 status note: the DRIVER-VISIBLE runaway is now bounded
+> (yaw governor + active damper in `ftc_robot_update`, gamepad expo; sustained
+> full rotate caps at -4.4 rock-steady vs -13.5 still creeping, gated by the
+> new `yaw_stability`). Everything below stands UNCHANGED as the underlying
+> defect analysis: the analytic path still has no longitudinal traction, the
+> damping shortfall is still structural (plus a measured lift feedback), and
+> the rejected patches below stay rejected. Stability control bounds the
+> symptom; it does not fix the tire. Do not close this on the gate.
+
 **Not fixed.** Recorded with its diagnosis because the obvious fixes make the
 drivetrain worse, and that is worth more than a bad patch.
 
@@ -1613,3 +1863,116 @@ lists TorqueNADO 40:1 stall as 594.7 oz-in. Ideal is `700 x 40/60 = 466.7
 oz-in`, and a reducer cannot exceed its ideal output torque. The table's
 ideal-derived 466 oz-in is correct and the external figure belongs to a
 different product.
+
+## [OPEN-LOOP-BALLISTICS] Open-loop lob scoring is build-sensitive (2026-10-12)
+
+**Recorded as closed**: the fictional launch (see `intake.h`, `bucket_game`
+gate) cannot be aimed open-loop with body confidence; every fixed
+speed/elevation that worked to five decimals died to the *next* decimal on
+rebuild (rim perches, CCD wall-face clamps, under/overshoots). Root causes
+measured, in order of impact:
+
+- **Billiard interference at the muzzle.** Loose balls helplessly scattered
+  in the launch corridor get rear-ended by the fired ball in the first
+  ticks: full muzzle speed at tick 0, then tempo-varying climb loss. Fixed
+  by strafing clear before shooting (the gate does it; a live driver does
+  it naturally).
+- **CCD bubble eating muzzle speed.** The chassis conservative CCD bubble
+  (~bounding R 0.33) swallowed 2–3 m/s on tick 0 when the launch started at
+  the mouth (FWD ~0.34). Fixed by `INTAKE_MUZZLE_FWD` 0.48 (ahead of the
+  chassis centre) + muzzle UP 0.12.
+- **Pitch swinging the elevation.** Braking dips the nose several degrees;
+  a chassis-frame elevation through `sin()` moved apex ±1 m run to run.
+  Fixed by world-frame elevation with yaw-only forward.
+- **A staged bucket eats the calibration shot.** The league's own geometry
+  in the flight path is a test artefact, not physics.
+
+Resolution: the gate is **self-calibrating** — shoot once, read the
+rim-height crossing, move the bucket under it, shoot again. Deterministic
+(same code twice → same flight) and robust to plant drift by construction.
+Anyone re-tuning launch constants should change the gate's expectations
+with them.
+
+## [BIOBUZZ-LIMITS] Regulation-league honest boundaries (2026-10-13, OPEN by design)
+
+The league (`submodules/biobuzz.c`) is regulation on every number the
+manual states exactly, nominal where the manual is nominal, and loud about
+the difference. Seven gates (`biobuzz_field/stage/tip/flower/table` +
+`shoot_power`/`hive_shot`) pin the split: anchors asserted as spec,
+repose/symmetry as self-consistency.
+
+- **Aimed shots are required, not optional (2026-10-14).** The stock
+  9 m/s 50° muzzle outranges the field and cannot place a ball in the
+  1.5 m mouths from any legal spot at any power (proven by trajectory) —
+  every such shot smacks frame or cell undersides. `ftc shoot [power]
+  [elev]` + gamepad RT/right-Y give the angle and range regulation play
+  needs (`hive_shot` gates a legal-spot entry); the predictor previews the
+  last aimed shot.
+
+- **Flower wall stations nominal.** The manual places 4 flowers "around
+  the perimeter" with down-cells "pointing at" audience/far flowers; exact
+  wall stations live in figures, not text. Built: 2 + 2 on audience/far
+  walls at x=±36 in. If a figure-derived station contradicts this, move
+  the four `fx/fz` constants (build + stage + score read the same
+  anchors — single source).
+- **Kinematic tip, not a damper solve.** The bi-stable pivot + damper is
+  an event (weight ≥ 8.0 → mirrored re-pose + deterministic spill). Exact
+  on the manual's stated thresholds, deterministic, edge-triggered; it is
+  NOT a weight-vs-damper dynamics solve. A revolute-joint dynamic hive is
+  the ticketed follow-up — do not mistake the event's cleanliness for it.
+- **No match clock, no fouls.** LEAVE/PARK are live predicates; AUTO vs
+  TELEOP labelling, G410 enforcement and fouls are human-ref territory.
+  `biobuzz score` reports predicates + points, never a period verdict.
+- **No AprilTag vision.** Tag cluster IDs (30–45) are recorded per cell
+  for autonomy use; rendering has no decal system, so cells carry no
+  visible tags. Do not write an autonomy gate against visible tags.
+- **Tray staging neglects the tile step.** Alliance trays sit outside the
+  walls at ground level; the 0.59 in tile step is not modelled (tray balls
+  rest on the pad plane). Garden/loading/flower/cell staging is exact.
+- **Orientation convention is ours.** −Z audience / +Z scoring / −X red /
+  +X blue is documented nominal (manual figures ±1 in, not
+  machine-readable). Mirroring the field (red/blue swapped) is a
+  four-constant change; the gates assert internal consistency, so a mirror
+  stays green.
+
+## [YAW-HANDLING] No yaw saturation + lift feedback + linear sticks (BOUNDED 2026-10-14)
+
+Driver report: "like trying to control a Ferrari F14T — oversteer then
+understeer all in one go, precarious." Measured, not vibes:
+
+- **Runaway:** step rotate=1.0 climbs -0.64 → -6.25 rad/s over 4 s with no
+  saturation in human timescales (20 s run: -13.5 still creeping). Wheels
+  sit at free speed (~215 rpm) with ~zero motor torque while yaw keeps
+  climbing — self-excited, not motor-driven.
+- **Zero passive decay:** command dropped to 0.04 (no idle switch, no
+  brake): -6.17 → -3.7 over 8 s. Release-to-zero stops dead in 20 ticks
+  only via brake + idle tires — all active, nothing passive.
+- **Lift feedback:** past ~3.5-4 rad/s the chassis rises ~1 cm (0.182 →
+  0.192) and wheel clearance parks at the 1 cm analytic contact gate,
+  flickering the only tangential force path on/off. Spin → lift → less
+  damping → more spin. (At rest the robot sits touching, clearance ±0.000
+  rock-steady — the hover is spin-induced.)
+- **Cut chatter while steering:** traction scale bounces 0.15-0.89
+  throughout (torque pulsing ≈ the surge cycle).
+- **Non-monotone strafe:** 0.4→-0.48, 0.5→-0.36, 0.6→-0.26 m/s (regime
+  jumping; untouched by this fix — deferred, see below).
+- **Linear sticks:** full deflection = instant full rotate into the above.
+
+**Bounded by (not fixed):** (1) yaw governor — delivered motor torque
+scales 1.0→0.15 over yaw 3.0→4.5 rad/s, all wheels equally (mixer
+directionality preserved); alone it only HALVED the growth rate (drive
+persists through contact at 0.15x), (2) active yaw damper — pure
+differential couple opposing spin, same deadband, unscaled authority
+(the governor floor would neuter it; cone-safe ≤6.3 N/wheel), (3) gamepad
+expo x^1.5 (UI-side only, endpoints preserved). Result: sustained full
+rotate caps at -4.4 ±0.03 over 900+ ticks; release still snaps clean.
+`yaw_stability` gates the cap (proven red pre-fix at 11.07/10.81).
+
+**Deliberately NOT touched:** analytic VREF (binary lateral feel;
+F2 margin thin), cut slam immediacy (debounce to 3 ticks broke
+drive_directions cross-talk + heading hold — reverted with cause),
+mixer rotate authority (structural gates pin it), strafe progression
+(separate regime-jump defect, ticketed). The lift mechanism itself
+(joint pump vs gyro ratchet) is un-instrumented — the governor keeps
+drivers out of its regime; the physics stays open alongside
+[MECANUM-PIVOT].

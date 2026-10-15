@@ -7,31 +7,19 @@
 #include <stdio.h>
 #include <math.h>
 void drivetrain_tank (ftc_robot *robot, float left_power, float right_power) {
-    if (!robot) {
-        return;
-    }
-    if (left_power > 1.0f) {
-        left_power = 1.0f;
-    }
-    if (left_power < -1.0f) {
-        left_power = -1.0f;
-    }
-    if (right_power > 1.0f) {
-        right_power = 1.0f;
-    }
-    if (right_power < -1.0f) {
-        right_power = -1.0f;
-    }
+    if (!robot) { return; }
+    if (left_power > 1.0f) { left_power = 1.0f; }
+    if (left_power < -1.0f) { left_power = -1.0f; }
+    if (right_power > 1.0f) { right_power = 1.0f; }
+    if (right_power < -1.0f) { right_power = -1.0f; }
     /* Wheel layout: [0]=front-left, [1]=front-right, [2]=back-left, [3]=back-right */
     float commands [FTC_MAX_WHEELS];
     for (int i = 0; i < robot -> wheel_count; i++) {
         bool is_left = (i % 2 == 0); /* 0,2 = left; 1,3 = right */
         commands [i] = is_left ? left_power : right_power;
-    }
-    ftc_robot_set_wheel_commands (robot, commands, robot -> wheel_count);
+    } ftc_robot_set_wheel_commands (robot, commands, robot -> wheel_count);
     /* MFS_162_DEAD_FIELD: mecanum_active removed */
-}
-/* MPE_FTC_075 + MPE_FTC_082: Mecanum drive with inverse kinematics
+} /* MPE_FTC_075 + MPE_FTC_082: Mecanum drive with inverse kinematics
  *
  * Since the wheel model uses spheres (no natural rolling direction),
  * mecanum strafe cannot work through wheel friction alone. We set
@@ -40,28 +28,14 @@ void drivetrain_tank (ftc_robot *robot, float left_power, float right_power) {
  * force for the strafe/rotate components. drivetrain_update() applies
  * that chassis force after ftc_robot_update(). */
 void drivetrain_mecanum (ftc_robot *robot, float forward, float strafe, float rotate) {
-    if (!robot) {
-        return;
-    }
+    if (!robot) { return; }
     /* Clamp inputs */
-    if (forward > 1.0f) {
-        forward = 1.0f;
-    }
-    if (forward < -1.0f) {
-        forward = -1.0f;
-    }
-    if (strafe > 1.0f) {
-        strafe = 1.0f;
-    }
-    if (strafe < -1.0f) {
-        strafe = -1.0f;
-    }
-    if (rotate > 1.0f) {
-        rotate = 1.0f;
-    }
-    if (rotate < -1.0f) {
-        rotate = -1.0f;
-    }
+    if (forward > 1.0f) { forward = 1.0f; }
+    if (forward < -1.0f) { forward = -1.0f; }
+    if (strafe > 1.0f) { strafe = 1.0f; }
+    if (strafe < -1.0f) { strafe = -1.0f; }
+    if (rotate > 1.0f) { rotate = 1.0f; }
+    if (rotate < -1.0f) { rotate = -1.0f; }
     /* M10 HONEST LIMIT: the mecanum inverse kinematics below is a
      * four-corner layout ([0]=FL [1]=FR [2]=BL [3]=BR). FTC_MAX_WHEELS is
      * 8, but ftc_robot carries no description of where an extra wheel sits,
@@ -80,24 +54,37 @@ void drivetrain_mecanum (ftc_robot *robot, float forward, float strafe, float ro
     }
     /* Mecanum IK: per-wheel velocity targets.
        Wheel layout: [0]=FL, [1]=FR, [2]=BL, [3]=BR
-       FL: forward + strafe - rotate
-       FR: forward - strafe + rotate
-       BL: forward - strafe - rotate
-       BR: forward + strafe + rotate
-       DESPOT-2026-10-02 (audited; signs CONFIRMED CORRECT by measurement,
-       not by the algebra that first appeared to indict them):
-       the anti-diagonal pairing (FL=f+s-R, FR=f-s+R, BL=f-s-R, BR=f+s+R)
-       was A/B tested against the diagonal pairing over a steady-state
-       window (ticks 180..240, after 180 ticks of drive). Pure rotate, the
-       shipped mixer gives +2.289 rad/s for r=+1 and -2.030 rad/s for r=-1:
-       correct sign, correct anti-symmetry, ~131 deg/s — a healthy mecanum
-       turn. The diagonal pairing (FL=f+s+R, FR=f-s-R, BL=f-s+R, BR=f+s-R)
-       gives -2.030 for r=+1 and +2.289 for r=-1: the same magnitude,
-       INVERTED. Both pairings produce equal-and-opposite pure torque on
-       paper (each is a zero-net-force, nonzero-torque combination of the
-       four rail forces), which is exactly why algebra alone cannot choose
-       between them: the sign is fixed by the convention, and the
-       convention is fixed by measurement.
+       FL: forward - strafe - rotate
+       FR: forward + strafe + rotate
+       BL: forward + strafe - rotate
+       BR: forward - strafe + rotate
+       DESPOT-2026-10-12 (strafe mirrored — live report "left/right
+       inverted", confirmed against the tree's own frame): forward +Z is
+       the tree's forward convention (drive_directions gate 1: +fwd drives
+       +Z; odometry v_fwd integrates into +Z). Facing +Z with up +Y, the
+       robot's right hand points at -X, so +strafe (right) must move -X.
+       The mapping above sent +strafe to +X — the robot's LEFT — while
+       forward stayed robot-relative: the mixer disagreed with itself (and
+       with every chase-view driver). Fix is a pure strafe negation; the
+       anti-diagonal structure is unchanged, only mirrored, so the engine
+       sees mirrored loads (same magnitudes) and odometry v_lat needs no
+       change (it reports measured motion, which flips with the physics).
+       DESPOT-2026-10-02 (audited; ANTI-DIAGONAL STRUCTURE + ROTATE signs
+       confirmed correct by measurement — that result stands and is why
+       only the strafe sign moves here, not the pairing): the anti-diagonal
+       pairing was A/B tested against the diagonal pairing over a
+       steady-state window (ticks 180..240, after 180 ticks of drive).
+       Pure rotate gives -4.50 rad/s for r=+1 and +4.44 rad/s for r=-1
+       (DESPOT-2026-10-14: the old +2.289/-2.030 were stale twice over —
+       first the atan2-fold artefact corrected to -5.68 in mfs_suite_a.c,
+       now the yaw governor caps the ramp at ~4.5; DESPOT-2026-10-14b: the
+       18-inch footprint resize (track 0.48 -> 0.40) left these essentially
+       unmoved, as expected — the cap, not the track, binds):
+       correct sign, correct anti-symmetry — a healthy mecanum turn. The
+       diagonal pairing gives the same magnitudes INVERTED. Both pairings
+       produce equal-and-opposite pure torque on paper, which is exactly
+       why algebra alone cannot choose between them: the sign is fixed by
+       the convention, and the convention is fixed by measurement.
        Recorded because the first pass got this backwards. A 3.0 s
        end-to-end average reported r=+1 producing +0.029 rad and r=-1
        producing +0.221 rad, which looks like a sign error; it is not. It
@@ -109,17 +96,15 @@ void drivetrain_mecanum (ftc_robot *robot, float forward, float strafe, float ro
        — the same trap made 'rotate barely works' look true when it does
        not. Pinned by mfs_t_drive_directions in tests/mfs_suite_a.c. */
     float wheel_targets [4];
-    wheel_targets [0] = forward + strafe - rotate;
-    wheel_targets [1] = forward - strafe + rotate;
-    wheel_targets [2] = forward - strafe - rotate;
-    wheel_targets [3] = forward + strafe + rotate;
+    wheel_targets [0] = forward - strafe - rotate;
+    wheel_targets [1] = forward + strafe + rotate;
+    wheel_targets [2] = forward + strafe - rotate;
+    wheel_targets [3] = forward - strafe + rotate;
     /* Normalize if any target exceeds 1.0 */
     float max_mag = 0.0f;
     for (int i = 0; i < 4; i++) {
         float mag = fabsf (wheel_targets [i]);
-        if (mag > max_mag) {
-            max_mag = mag;
-        }
+        if (mag > max_mag) { max_mag = mag; }
     }
     if (max_mag > 1.0f) {
         for (int i = 0; i < 4; i++) {
@@ -128,8 +113,7 @@ void drivetrain_mecanum (ftc_robot *robot, float forward, float strafe, float ro
     }
     /* Set motor commands (forward component uses wheel traction) */
     ftc_robot_set_wheel_commands (robot, wheel_targets, 4);
-}
-/* ---------------------------------------------------------------------
+} /* ---------------------------------------------------------------------
  * DRIVETRAIN: no force model at all.
  *
  * Everything that used to live here has been deleted, because none of it was
@@ -201,18 +185,10 @@ static void drivetrain_odometry_update (physics_world *world, ftc_robot *robot, 
  * Deterministic: det_sin/det_cos + arithmetic + sqrtf only.
  * --------------------------------------------------------------------- */
 static void drivetrain_mecanum_analytic (physics_world *world, ftc_robot *robot) {
-    if ((!world) || (!robot)) {
-        return;
-    }
-    if (!robot -> mecanum_analytic) {
-        return;
-    }
-    if (robot -> drivetrain_type != FTC_DRIVETRAIN_MECANUM) {
-        return;
-    }
-    if (robot -> wheel_count <= 0) {
-        return;
-    }
+    if ((!world) || (!robot)) { return; }
+    if (!robot -> mecanum_analytic) { return; }
+    if (robot -> drivetrain_type != FTC_DRIVETRAIN_MECANUM) { return; }
+    if (robot -> wheel_count <= 0) { return; }
     /* DESPOT-2026-10-04: idle = engine tires own the contact (robot.c
      * idle-tire switch restores real hub friction below command). Running
      * this lateral force alongside would double-count past the cone, and
@@ -226,25 +202,16 @@ static void drivetrain_mecanum_analytic (physics_world *world, ftc_robot *robot)
     {
         int wi0 = (robot -> wheel_count > 0) ? robot -> wheel_bodies [0] : -1;
         int tires_idle = (wi0 >= 0 && wi0 < world -> body_count && world -> bodies [wi0].friction_static > 0.45f) ? 1 : 0;
-        if (tires_idle) {
-            return;
-        }
-    }
-    int ci = robot -> chassis_body;
-    if ((ci < 0) || (ci >= world -> body_count)) {
-        return;
-    }
+        if (tires_idle) { return; }
+    } int ci = robot -> chassis_body;
+    if ((ci < 0) || (ci >= world -> body_count)) { return; }
     rigidbody *ch = &world -> bodies [ci];
     float total_mass = ch -> mass;
     for (int i = 0; i < robot -> wheel_count; i++) {
         int wi = robot -> wheel_bodies [i];
-        if ((wi >= 0) && (wi < world -> body_count)) {
-            total_mass += world -> bodies [wi].mass;
-        }
+        if ((wi >= 0) && (wi < world -> body_count)) { total_mass += world -> bodies [wi].mass; }
     }
-    if (!(total_mass > 0.0f) || !isfinite (total_mass)) {
-        return;
-    }
+    if (!(total_mass > 0.0f) || !isfinite (total_mass)) { return; }
     /* DESPOT-2026-10-02 (mathematical lie: gravity was hardcoded, and the
      * fallback was wrong in the one case that matters).
      *
@@ -278,42 +245,43 @@ static void drivetrain_mecanum_analytic (physics_world *world, ftc_robot *robot)
      * roller with no normal load genuinely cannot push. */
     const mpe_config_t *cfg = mpe_world_cfg (world);
     const float g_mag = fabsf (cfg -> world.gravity);
-    if (!(g_mag >= 0.0f) || !isfinite (g_mag)) {
-        return;
-    }
+    if (!(g_mag >= 0.0f) || !isfinite (g_mag)) { return; }
     float n_per_wheel = total_mass * g_mag / (float) robot -> wheel_count;
     float f_max = MFS_MECANUM_ANALYTIC_MU * n_per_wheel;
-    if (!(f_max >= 0.0f) || !isfinite (f_max)) {
-        return;
-    }
+    if (!(f_max >= 0.0f) || !isfinite (f_max)) { return; }
     for (int i = 0; i < robot -> wheel_count; i++) {
         int wi = robot -> wheel_bodies [i];
-        if ((wi < 0) || (wi >= world -> body_count)) {
-            continue;
-        }
+        if ((wi < 0) || (wi >= world -> body_count)) { continue; }
         rigidbody *wheel = &world -> bodies [wi];
         float r_run = 0.0f;
-        if ((i >= 0) && (i < FTC_MAX_WHEELS) && (robot -> wheel_effective_radius [i] > 0.001f)) {
-            r_run = robot -> wheel_effective_radius [i];
-        }
-        if (!(r_run > 0.001f) || !isfinite (r_run)) {
-            continue;
-        }
+        if ((i >= 0) && (i < FTC_MAX_WHEELS) && (robot -> wheel_effective_radius [i] > 0.001f)) { r_run = robot -> wheel_effective_radius [i]; }
+        if (!(r_run > 0.001f) || !isfinite (r_run)) { continue; }
         /* DESPOT-2026-09-28: was 0.05 m — hover force. True-contact scale. */
         if (wheel -> position.y - r_run > 0.01f) {
-            continue;
-        } /* airborne */
+            /* DESPOT-2026-10-08 air-spin bearing damping: free-spinning
+             * jointed wheels limit-cycled (motor 86 rpm vs true 799 rpm)
+             * via revolute-to-kinematic impulses vs slew/governor. Apply a
+             * tiny dissipative bearing torque in air ONLY:
+             * tau = -c*w with c=1e-6 N·m·s. Stability: c*dt/I =
+             * 1e-6*0.0167/2.5e-7 ≈ 0.067 < 1, so no runaway (±1900 rpm
+             * bypass tried and reverted). Grounded path below unchanged. */
+            float wx = wheel -> angular_velocity.x;
+            float wy = wheel -> angular_velocity.y;
+            float wz = wheel -> angular_velocity.z;
+            if (isfinite (wx) && isfinite (wy) && isfinite (wz)) {
+                const float c_bear = 1e-6f;
+                wheel -> torque_accumulator.x -= c_bear * wx;
+                wheel -> torque_accumulator.y -= c_bear * wy;
+                wheel -> torque_accumulator.z -= c_bear * wz;
+            } continue;
+        } /* airborne (bearing-damped, no contact thrust) */
         float theta = robot -> wheel_roller_angle [i];
-        if (!isfinite (theta)) {
-            continue;
-        }
+        if (!isfinite (theta)) { continue; }
         vector3 a_local = {(float) det_sin ((double) theta), 0.0f, (float) det_cos ((double) theta)};
         vector3 a_world = vector4_rotate_to_vector3 (ch -> orientation, a_local);
         a_world.y = 0.0f; /* contact plane */
         float a_len_sq = vector3_length_squared (a_world);
-        if (!(a_len_sq > 1e-12f) || !isfinite (a_len_sq)) {
-            continue;
-        }
+        if (!(a_len_sq > 1e-12f) || !isfinite (a_len_sq)) { continue; }
         a_world = vector3_scaling (a_world, 1.0f / sqrtf (a_len_sq));
         /* Contact-patch slip velocity (bottom point; planar only — the
          * normal solver owns Y). */
@@ -321,16 +289,11 @@ static void drivetrain_mecanum_analytic (physics_world *world, ftc_robot *robot)
         vector3 v_c = vector3_addition (wheel -> velocity, vector3_cross (wheel -> angular_velocity, r_c));
         v_c.y = 0.0f;
         float v_a = vector3_dot (v_c, a_world);
-        if (!isfinite (v_a)) {
-            continue;
-        }
+        if (!isfinite (v_a)) { continue; }
         float u = v_a / MFS_MECANUM_ANALYTIC_VREF;
-        if (u > 1.0f) {
-            u = 1.0f;
-        } else if (u < -1.0f) {
+        if (u > 1.0f) { u = 1.0f; } else if (u < -1.0f) {
             u = -1.0f;
-        }
-        vector3 F = vector3_scaling (a_world, -f_max * u);
+        } vector3 F = vector3_scaling (a_world, -f_max * u);
         wheel -> force_accumulator = vector3_addition (wheel -> force_accumulator, F);
         /* DESPOT-2026-10-04 (axle projection TRIED AND REVERTED): keeping
          * only the axle-parallel part of r×F did not move the harsh-drive
@@ -341,9 +304,7 @@ static void drivetrain_mecanum_analytic (physics_world *world, ftc_robot *robot)
     }
 }
 void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
-    if ((!world) || (!robot) || (dt <= 0.0f)) {
-        return;
-    }
+    if ((!world) || (!robot) || (dt <= 0.0f)) { return; }
     const mpe_config_t *drive_cfg = mpe_world_cfg (world);
     /* The only actuation: the real motor model in ftc_robot_update, applied
      * as a torque couple between hub and chassis. Ground friction is then
@@ -379,9 +340,7 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
                     total_mass += world -> bodies [wi].mass;
                     for (int k = 0; k < robot -> roller_count [i]; k++) {
                         int rb = robot -> roller_bodies [i][k];
-                        if ((rb >= 0) && (rb < world -> body_count)) {
-                            total_mass += world -> bodies [rb].mass;
-                        }
+                        if ((rb >= 0) && (rb < world -> body_count)) { total_mass += world -> bodies [rb].mass; }
                     }
                 }
             }
@@ -397,29 +356,19 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
                 const float f_rr = c_rr * total_mass * g_mag / (float) robot -> wheel_count;
                 for (int i = 0; i < robot -> wheel_count; i++) {
                     int wi = robot -> wheel_bodies [i];
-                    if ((wi < 0) || (wi >= world -> body_count)) {
-                        continue;
-                    }
+                    if ((wi < 0) || (wi >= world -> body_count)) { continue; }
                     rigidbody *wheel = &world -> bodies [wi];
                     /* Effective contact radius: the rollers define the
                      * running surface, not the hub plate. */
                     const float r_eff = robot -> wheel_effective_radius [i];
-                    if (r_eff <= 0.001f) {
-                        continue;
-                    }
+                    if (r_eff <= 0.001f) { continue; }
                     vector3 axle = wheel -> cached_axes [0];
-                    if (vector3_length_squared (axle) < 0.0001f) {
-                        continue;
-                    }
+                    if (vector3_length_squared (axle) < 0.0001f) { continue; }
                     float omega = vector3_dot (wheel -> angular_velocity, axle);
-                    if (fabsf (omega) < 0.01f) {
-                        continue;
-                    }
+                    if (fabsf (omega) < 0.01f) { continue; }
                     /* Free-rolling only: a driven wheel's net torque is the
                      * motor's business, not rolling resistance's. */
-                    if (fabsf (robot -> wheel_motors [i].command) > 0.05f) {
-                        continue;
-                    }
+                    if (fabsf (robot -> wheel_motors [i].command) > 0.05f) { continue; }
                     float sign = (omega > 0.0f) ? -1.0f : 1.0f;
                     wheel -> torque_accumulator =
                         vector3_addition (wheel -> torque_accumulator, vector3_scaling (axle, sign * f_rr * r_eff));
@@ -436,14 +385,10 @@ void drivetrain_update (physics_world *world, ftc_robot *robot, float dt) {
         if ((cidx >= 0) && (cidx < world -> body_count)) {
             const rigidbody *cb = &world -> bodies [cidx];
             const float speed_sq = (cb -> velocity.x * cb -> velocity.x) + (cb -> velocity.z * cb -> velocity.z);
-            if (speed_sq > 9.0f) {
-                robot -> clamp_events++;
-            }
+            if (speed_sq > 9.0f) { robot -> clamp_events++; }
         }
-    }
-    drivetrain_odometry_update (world, robot, dt);
-}
-/* ---------------------------------------------------------------------
+    } drivetrain_odometry_update (world, robot, dt);
+} /* ---------------------------------------------------------------------
  * Encoder odometry: forward kinematics from the wheel encoders.
  *
  * This is what a real robot reports, so it is what is integrated here:
@@ -483,22 +428,16 @@ static void drivetrain_odometry_update (physics_world *world, ftc_robot *robot, 
     {
         int base_ppr = motor_preset_base_encoder_ppr (robot -> motor_preset);
         float gear = (robot -> wheel_count > 0) ? robot -> wheel_motors [0].gear_ratio : 1.0f;
-        if (base_ppr > 0 && gear > 0.0f && isfinite (gear)) {
-            counts_per_rev = (float) base_ppr * gear;
-        }
-    }
-    const float quant_on = (counts_per_rev > 1.0f && dt > 0.0f) ? 1.0f : 0.0f;
+        if (base_ppr > 0 && gear > 0.0f && isfinite (gear)) { counts_per_rev = (float) base_ppr * gear; }
+    } const float quant_on = (counts_per_rev > 1.0f && dt > 0.0f) ? 1.0f : 0.0f;
     for (int i = 0; i < robot -> wheel_count && i < FTC_MAX_WHEELS; i++) {
         const int wi = robot -> wheel_bodies [i];
-        if ((wi < 0) || (wi >= world -> body_count)) {
-            continue;
-        }
+        if ((wi < 0) || (wi >= world -> body_count)) { continue; }
         rigidbody *w = &world -> bodies [wi];
         vector3 axle = w -> cached_axes [0];
         if (vector3_length_squared (axle) < 0.0001f) {
             axle = vector4_rotate_to_vector3 (w -> orientation, (vector3) {1.0f, 0.0f, 0.0f});
-        }
-        const float omega = vector3_dot (w -> angular_velocity, axle);
+        } const float omega = vector3_dot (w -> angular_velocity, axle);
         robot -> wheel_radians [i] += omega * dt;
         if (quant_on > 0.5f) {
             /* True angle -> integer counts -> quantized angle.
@@ -529,9 +468,7 @@ static void drivetrain_odometry_update (physics_world *world, ftc_robot *robot, 
             break;
         }
     }
-    if (r <= 0.001f) {
-        r = 0.05f;
-    }
+    if (r <= 0.001f) { r = 0.05f; }
     float v_fwd = 0.0f, v_lat = 0.0f, yaw_rate = 0.0f;
     if (robot -> wheel_count >= 4) {
         const float wfl = w_rad [0], wfr = w_rad [1];
@@ -561,23 +498,20 @@ static void drivetrain_odometry_update (physics_world *world, ftc_robot *robot, 
          * at all.
          *
          * Mecanum yaw moment arm is (Lx + Lz) -- the WHEEL track, not the
-         * chassis box: WHEEL_OFFSET_X (0.24) + WHEEL_OFFSET_Z (0.20) = 0.44 m
-         * (robot.c). The 0.45 introduced 2026-10-05 was justified with
-         * CHASSIS_HALF_X/Z (0.225), which are the chassis COLLISION BOX
-         * half-extents and have nothing to do with where the wheels sit; it was
-         * a 2.27% yaw-rate bias layered on the wrong-sign bug. Reverted here.
+         * chassis box: WHEEL_OFFSET_X + WHEEL_OFFSET_Z (robot.h -- the 0.45
+         * introduced 2026-10-05 was justified with CHASSIS_HALF_X/Z, which
+         * are the chassis COLLISION BOX half-extents and have nothing to do
+         * with where the wheels sit; it was a 2.27% yaw-rate bias layered
+         * on the wrong-sign bug. Reverted here. Computed from the defines
+         * so a footprint change cannot silently re-bias odometry (the exact
+         * drift class that produced the 0.45 episode).
          * docs/MODELS.md already documented 0.44 throughout. */
-        yaw_rate = (((wfl - wfr + wbl - wbr) * 0.25f) * r) / 0.44f;
+        yaw_rate = (((wfl - wfr + wbl - wbr) * 0.25f) * r) / (WHEEL_OFFSET_X + WHEEL_OFFSET_Z);
     } else if (robot -> wheel_count >= 2) {
         float wl = 0.0f, wr = 0.0f;
         for (int i = 0; i < robot -> wheel_count; i++) {
-            if ((i % 2) == 0) {
-                wl += w_rad [i];
-            } else {
-                wr += w_rad [i];
-            }
-        }
-        const int nl = (robot -> wheel_count + 1) / 2;
+            if ((i % 2) == 0) { wl += w_rad [i]; } else { wr += w_rad [i]; }
+        } const int nl = (robot -> wheel_count + 1) / 2;
         const int nr = robot -> wheel_count / 2;
         wl = (nl > 0) ? (wl / (float) nl) : 0.0f;
         wr = (nr > 0) ? (wr / (float) nr) : 0.0f;
@@ -586,11 +520,11 @@ static void drivetrain_odometry_update (physics_world *world, ftc_robot *robot, 
          * Measured: tank L+0.5/R-0.5 gives true yaw +0.1293 rad over 20 ticks
          * while odom_theta read -0.3993. Corrected to (wl - wr): a positive
          * left-minus-right wheel-speed difference is a positive rotation about
-         * +Y. Arm is 2*Lx = 2*WHEEL_OFFSET_X = 0.48 m, unchanged and already
-         * correct (it uses the wheel offset, not the chassis box). */
-        yaw_rate = ((wl - wr) * r) / 0.48f;
-    }
-    robot -> odom_theta += yaw_rate * dt;
+         * +Y. Arm is 2*Lx = 2*WHEEL_OFFSET_X (robot.h), unchanged and already
+         * correct (it uses the wheel offset, not the chassis box). Computed
+         * from the define (see mecanum arm note above). */
+        yaw_rate = ((wl - wr) * r) / (2.0f * WHEEL_OFFSET_X);
+    } robot -> odom_theta += yaw_rate * dt;
     /* DESPOT-FIX (math lie): odom_theta grew unbounded and cosf/sinf lost
      * precision on long runs (libm trig error grows with |theta|; past ~1e4
      * rad the heading is noise). Wrap to [-pi,pi] every tick — exact for
@@ -605,16 +539,13 @@ static void drivetrain_odometry_update (physics_world *world, ftc_robot *robot, 
     {
         const float pi = 3.14159265358979323846f;
         const float two_pi = 6.28318530717958647692f;
-        if (!isfinite (robot -> odom_theta)) {
-            robot -> odom_theta = 0.0f;
-        } else if (robot -> odom_theta > pi || robot -> odom_theta < -pi) {
+        if (!isfinite (robot -> odom_theta)) { robot -> odom_theta = 0.0f; } else if (robot -> odom_theta > pi || robot -> odom_theta < -pi) {
             float wrapped = fmodf (robot -> odom_theta + pi, two_pi);
             if (wrapped < 0.0f)
                 wrapped += two_pi;
             robot -> odom_theta = wrapped - pi;
         }
-    }
-    const float c = (float) det_cos ((double) robot -> odom_theta);
+    } const float c = (float) det_cos ((double) robot -> odom_theta);
     const float s = (float) det_sin ((double) robot -> odom_theta);
     /* body->world yaw about +Y: x' = x*c + z*s ; z' = -x*s + z*c */
     robot -> odom_x += (v_lat * c + v_fwd * s) * dt;
@@ -635,10 +566,7 @@ static void drivetrain_odometry_update (physics_world *world, ftc_robot *robot, 
             float ex = evx - tvx, ez = evz - tvz;
             float planar_err = sqrtf (ex * ex + ez * ez);
             float yaw_err = fabsf (yaw_rate - ch -> angular_velocity.y);
-            if ((isfinite (planar_err) && planar_err > 0.25f) || (isfinite (yaw_err) && yaw_err > 0.35f)) {
-                slip = 1;
-            }
-        }
-        robot -> odom_slip = slip;
+            if ((isfinite (planar_err) && planar_err > 0.25f) || (isfinite (yaw_err) && yaw_err > 0.35f)) { slip = 1; }
+        } robot -> odom_slip = slip;
     }
 }

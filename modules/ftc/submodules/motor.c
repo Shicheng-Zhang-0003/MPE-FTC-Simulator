@@ -4,9 +4,7 @@
 #define MOTOR_RPM_TO_RAD_S 0.104719755f /* 2*pi/60 */
 void motor_from_spec (motor *m, float stall_torque_nm, float free_speed_rpm, float stall_current_a,
                       float nominal_voltage, float gear_ratio, float efficiency) {
-    if (!m) {
-        return;
-    }
+    if (!m) { return; }
     m -> stall_current = stall_current_a;
     m -> free_speed_rad_s = free_speed_rpm * MOTOR_RPM_TO_RAD_S;
     m -> gear_ratio = (gear_ratio > 0.0f) ? gear_ratio : 1.0f;
@@ -37,18 +35,12 @@ void motor_from_spec (motor *m, float stall_torque_nm, float free_speed_rpm, flo
     m -> wprev_valid = 0;
 }
 void motor_update (motor *m, float wheel_angular_vel, float dt, float battery_voltage) {
-    if ((!m) || (dt <= 0.0f)) {
-        return;
-    }
+    if ((!m) || (dt <= 0.0f)) { return; }
     /* DESPOT-2026-10-01: fail-closed on non-finite bus voltage (NULL-battery
      * NAN, corrupt pack). Old code let NAN through: current/torque/temperature
      * all latched NAN and the pack bricked for the run. Clamp to OCV floor. */
-    if (!isfinite (battery_voltage)) {
-        battery_voltage = 12.0f;
-    }
-    if (!isfinite (wheel_angular_vel)) {
-        return;
-    }
+    if (!isfinite (battery_voltage)) { battery_voltage = 12.0f; }
+    if (!isfinite (wheel_angular_vel)) { return; }
     float motor_shaft_vel = wheel_angular_vel * m -> gear_ratio;
     /* BackEMF opposes applied voltage */
     m -> back_emf = m -> kv * motor_shaft_vel;
@@ -67,12 +59,8 @@ void motor_update (motor *m, float wheel_angular_vel, float dt, float battery_vo
         r_eff = m -> resistance;
     /* Current = (V - BackEMF) / R, clamped to stall */
     float raw_current = (applied_voltage - m -> back_emf) / r_eff;
-    if (raw_current > m -> stall_current) {
-        raw_current = m -> stall_current;
-    }
-    if (raw_current < -m -> stall_current) {
-        raw_current = -m -> stall_current;
-    }
+    if (raw_current > m -> stall_current) { raw_current = m -> stall_current; }
+    if (raw_current < -m -> stall_current) { raw_current = -m -> stall_current; }
     m -> current = raw_current;
     /* Torque = Kt * I (motor-shaft ideal); efficiency applied once at the
      * gearbox output below. NOTE: Kt and Kv are fit independently to the
@@ -106,21 +94,15 @@ void motor_update (motor *m, float wheel_angular_vel, float dt, float battery_vo
         float heat_generated = m -> current * m -> current * r_eff * dt;
         float cooling = (m -> temperature - 25.0f) * 0.01f * dt;
         m -> temperature += heat_generated * 0.1f - cooling;
-        if (m -> temperature < 25.0f) {
-            m -> temperature = 25.0f;
-        }
+        if (m -> temperature < 25.0f) { m -> temperature = 25.0f; }
         if (m -> temperature > 150.0f) {
             m -> temperature = 150.0f; /* magnet ceiling (see derating note) */
         }
     }
 }
 void motor_update_load (motor *m, float wheel_angular_vel, float dt, float battery_voltage, float axle_inertia) {
-    if ((!m) || (dt <= 0.0f)) {
-        return;
-    }
-    if (!isfinite (battery_voltage)) {
-        battery_voltage = 12.0f;
-    }
+    if ((!m) || (dt <= 0.0f)) { return; }
+    if (!isfinite (battery_voltage)) { battery_voltage = 12.0f; }
     if (!(axle_inertia > 0.0f) || !isfinite (axle_inertia)) {
         motor_update (m, wheel_angular_vel, dt, battery_voltage);
         return;
@@ -147,8 +129,7 @@ void motor_update_load (motor *m, float wheel_angular_vel, float dt, float batte
     if (!(r_eff > 0.0f) || !isfinite (A) || !isfinite (B)) {
         motor_update (m, wheel_angular_vel, dt, battery_voltage);
         return;
-    }
-    float tau_L = (m -> wprev_valid && isfinite (m -> load_torque)) ? m -> load_torque : 0.0f;
+    } float tau_L = (m -> wprev_valid && isfinite (m -> load_torque)) ? m -> load_torque : 0.0f;
     float w_end =
         (wheel_angular_vel + (A * applied_voltage + tau_L) * dt / axle_inertia) / (1.0f + A * B * dt / axle_inertia);
     if (!isfinite (w_end)) {
@@ -156,7 +137,7 @@ void motor_update_load (motor *m, float wheel_angular_vel, float dt, float batte
         return;
     }
     /* Clamp the predicted end-of-tick speed to the motor's own no-load speed
-     * AT THE CURRENT BUS VOLTAGE.
+     * AT THE COMMANDED VOLTAGE (V_applied = bus * command).
      *
      * The implicit solve above linearises back-EMF, so on a lightly loaded
      * wheel it badly OVER-predicts: at 26.9:1 with I=2.5e-4 kg.m^2 it
@@ -189,33 +170,35 @@ void motor_update_load (motor *m, float wheel_angular_vel, float dt, float batte
      * free speed would see less back-EMF than it should, regenerative
      * braking would silently switch off, and the wheel would run away
      * instead of being pulled back down.
+     *
+     * DESPOT-2026-10-12 (partial-throttle limit cycle FIXED): the bound used
+     * the BUS voltage, i.e. the no-load point at FULL throttle, regardless of
+     * command. At |command| < 1 the true applied voltage - and so the true
+     * powered no-load point - is bus*|command|, but the clamp permitted the
+     * solve to predict up to the FULL-throttle free speed. Any observer load
+     * spike then over-predicted w_end toward that too-high ceiling, inflated
+     * back-EMF, and drove a braking slam the next tick - a positive-feedback
+     * limit cycle that only engaged off full throttle (full command is
+     * bit-identical: bus*1 == bus). Measured straight drive, cmd=0.5: wheel 0
+     * alternated +230/-125 rpm every tick and the robot netted BACKWARD
+     * (yaw-rate std 0.19 rad/s, displacement -0.21 m over 8 s); cmd=0.25/0.35
+     * also netted backward. With the applied-voltage bound: cmd>=0.15 drives
+     * forward monotonically (0.5 -> 2.74 m, yaw-rate std 0.002), full command
+     * unchanged (7.928 m, std 0.0591). Gated by `partial_throttle`.
      */
     {
         float w_lim = m -> free_speed_rad_s; /* 12 V spec point: fallback only */
-        if (m -> kv > 0.0f && m -> gear_ratio > 0.0f && isfinite (battery_voltage) && battery_voltage > 0.0f) {
-            w_lim = battery_voltage / (m -> kv * m -> gear_ratio);
-        }
-        if (!isfinite (w_lim) || (w_lim < 0.0f)) {
-            w_lim = m -> free_speed_rad_s;
-        }
+        if (m -> kv > 0.0f && m -> gear_ratio > 0.0f && isfinite (applied_voltage)) { w_lim = fabsf (applied_voltage) / (m -> kv * m -> gear_ratio); }
+        if (!isfinite (w_lim) || (w_lim < 0.0f)) { w_lim = m -> free_speed_rad_s; }
         if (fabsf (wheel_angular_vel) > w_lim) {
             w_lim = fabsf (wheel_angular_vel); /* keep full braking authority */
         }
-        if (w_end > w_lim) {
-            w_end = w_lim;
-        }
-        if (w_end < -w_lim) {
-            w_end = -w_lim;
-        }
-    }
-    m -> back_emf = m -> kv * (w_end * m -> gear_ratio);
+        if (w_end > w_lim) { w_end = w_lim; }
+        if (w_end < -w_lim) { w_end = -w_lim; }
+    } m -> back_emf = m -> kv * (w_end * m -> gear_ratio);
     float raw_current = (applied_voltage - m -> back_emf) / r_eff;
-    if (raw_current > m -> stall_current) {
-        raw_current = m -> stall_current;
-    }
-    if (raw_current < -m -> stall_current) {
-        raw_current = -m -> stall_current;
-    }
+    if (raw_current > m -> stall_current) { raw_current = m -> stall_current; }
+    if (raw_current < -m -> stall_current) { raw_current = -m -> stall_current; }
     m -> current = raw_current;
     m -> torque = m -> kt * m -> current;
     m -> output_torque = m -> torque * m -> gear_ratio * m -> efficiency;
@@ -229,19 +212,15 @@ void motor_update_load (motor *m, float wheel_angular_vel, float dt, float batte
             exp_i = -m -> stall_current;
         m -> torque_explicit = m -> kt * exp_i * m -> gear_ratio * m -> efficiency;
         m -> tau_exp_prev = m -> torque_explicit;
-    }
-    m -> rpm = w_end / MOTOR_RPM_TO_RAD_S;
+    } m -> rpm = w_end / MOTOR_RPM_TO_RAD_S;
     float heat_generated = m -> current * m -> current * r_eff * dt;
     float cooling = (m -> temperature - 25.0f) * 0.01f * dt;
     m -> temperature += heat_generated * 0.1f - cooling;
-    if (m -> temperature < 25.0f) {
-        m -> temperature = 25.0f;
-    }
+    if (m -> temperature < 25.0f) { m -> temperature = 25.0f; }
     if (m -> temperature > 150.0f) {
         m -> temperature = 150.0f; /* magnet ceiling (see derating note) */
     }
-}
-/* FIX-AUDIT-DESPOT: teleport/back-button paths move bodies discontinuously,
+} /* FIX-AUDIT-DESPOT: teleport/back-button paths move bodies discontinuously,
  * which the disturbance observer reads as an infinite load spike
  * (I*dw/dt across a warp). Reset the observer on every teleport so the
  * next tick starts from "no load information" instead of a phantom stall. */
@@ -260,9 +239,7 @@ void motor_update_load (motor *m, float wheel_angular_vel, float dt, float batte
  * Now the estimate and its validity flag are set here, by the module that
  * reads them, and callers cannot get it wrong. */
 void motor_observe (motor *m, float wheel_angular_vel, float dt, float axle_inertia) {
-    if (!m) {
-        return;
-    }
+    if (!m) { return; }
     /* w_prev is the PREVIOUS sample; the estimate is a difference against it,
      * so the new reading is stored only after the difference is taken. */
     if (!(axle_inertia > 0.0f) || !(dt > 0.0f) || !isfinite (wheel_angular_vel)) {
@@ -282,19 +259,29 @@ void motor_observe (motor *m, float wheel_angular_vel, float dt, float axle_iner
         m -> load_torque = 0.0f;
         m -> wprev_valid = 1;
         return;
-    }
-    float stall_out = m -> stall_current * m -> kt * m -> gear_ratio * m -> efficiency;
-    if (!(stall_out > 0.5f) || !isfinite (stall_out)) {
-        stall_out = 1.0f;
-    }
+    }     float stall_out = m -> stall_current * m -> kt * m -> gear_ratio * m -> efficiency;
+    if (!(stall_out > 0.5f) || !isfinite (stall_out)) { stall_out = 1.0f; }
     float tau_cap = 2.0f * stall_out;
     float tau_l = axle_inertia * (wheel_angular_vel - m -> w_prev) / dt - m -> tau_exp_prev;
-    if (!isfinite (tau_l)) {
-        tau_l = 0.0f;
-    } else if (tau_l > tau_cap) {
+    if (!isfinite (tau_l)) { tau_l = 0.0f; } else if (tau_l > tau_cap) {
         tau_l = tau_cap;
-    } else if (tau_l < -tau_cap) {
-        tau_l = -tau_cap;
+    } else if (tau_l < -tau_cap) { tau_l = -tau_cap; }
+    /* DESPOT-2026-10-14 Q-filter (accuracy): the raw difference above is
+     * unfiltered 60 Hz differencing — any per-tick speed ripple (joint
+     * impulses, the implicit clamp, quantization) returns next tick as a
+     * phantom load of INERTIA-scale, and the solve slams back: measured
+     * ±stall current alternation with w swinging ±200 rad/s around a 92
+     * rpm mean (free-speed rig, observer armed). Textbook DOBs low-pass
+     * the observation (Q-filter); this one did not. First-order lag with
+     * TAU = 5 ticks (alpha = dt/(TAU*dt+dt) = 1/6): chatter at 1-3-tick
+     * periods attenuates ~6x while sustained loads (stall, grade, tow)
+     * converge through in ~5 ticks. The implicit solve consumes the
+     * filtered value; the blocked-rotor gate below sees it too. */
+    {
+        const float alpha = 1.0f / 6.0f;
+        float prev = (isfinite (m -> load_torque_filt)) ? m -> load_torque_filt : 0.0f;
+        m -> load_torque_filt = prev + alpha * (tau_l - prev);
+        tau_l = m -> load_torque_filt;
     }
     /* Blocked-rotor gate: a motor at its torque limit whose shaft is not
      * turning is, by definition, transmitting its full stall torque. This
@@ -308,17 +295,15 @@ void motor_observe (motor *m, float wheel_angular_vel, float dt, float axle_iner
             fabsf (wheel_angular_vel) < w_blk) {
             tau_l = (tau_ref >= 0.0f) ? -stall_out : stall_out;
         }
-    }
-    m -> load_torque = tau_l;
+    } m -> load_torque = tau_l;
     m -> w_prev = wheel_angular_vel;
     m -> wprev_valid = 1;
 }
 void motor_reset_observer (motor *m) {
-    if (!m) {
-        return;
-    }
+    if (!m) { return; }
     m -> wprev_valid = 0;
     m -> load_torque = 0.0f;
+    m -> load_torque_filt = 0.0f;
     m -> w_prev = 0.0f;
     m -> tau_exp_prev = 0.0f;
 }

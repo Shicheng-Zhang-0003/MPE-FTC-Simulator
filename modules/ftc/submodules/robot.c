@@ -5,21 +5,7 @@
 #include "config/mpe_config.h"
 #include <math.h>
 #include <string.h>
-/* Robot dimensions (metres, approximate FTC 18" x 18" chassis) */
-#define CHASSIS_HALF_X 0.225f
-#define CHASSIS_HALF_Y 0.075f
-#define CHASSIS_HALF_Z 0.225f
-#define CHASSIS_MASS 8.0f /* ~18 lb robot */
-#define WHEEL_RADIUS 0.05f /* 100mm wheels */
-#define WHEEL_MASS 0.2f
-#define WHEEL_HALF_WIDTH 0.02f /* 40mm wide wheels */
-#define WHEEL_OFFSET_X 0.24f /* slightly outside chassis */
-#define WHEEL_OFFSET_Z 0.20f
-#define WHEEL_Y_OFFSET                                                                                                 \
-    (-CHASSIS_HALF_Y - WHEEL_RADIUS -                                                                                  \
-     0.005f) /* MFS_PORT_V15S: 5mm ground clearance. The old +0.01f tucked wheel tops 10mm INSIDE the chassis box, so the contact solver fought the joint-held pose every tick (sinking, chatter, pitch-unload). Joints hold anchors, not volumes — interpenetrating rest poses are solver poison. */
-#define WHEEL_PRELOAD                                                                                                  \
-    0.002f /* MFS_PORT_V15S: joint anchors sit 2mm BELOW exact touch so P2P preloads wheels into persistent floor contact. Inside slop (10mm): no positional fight, but the manifold never grazes out to a hover-skid (which starves odometry). Real suspensions run droop/preload the same way. */
+/* Robot dimensions live in robot.h (single source of truth). */
 /* ---------------------------------------------------------------------
  * MECANUM ROLLER GEOMETRY (real dimensions, not a force model)
  *
@@ -179,14 +165,10 @@ _Static_assert (MFS_ROLLERS_PER_WHEEL >= MECANUM_ROLLERS_PER_ROW * MECANUM_ROLLE
 static vector4 rb_orient_from_axis (vector3 axis) {
     const vector3 from = {1.0f, 0.0f, 0.0f};
     float len = vector3_length (axis);
-    if (!(len > 1.0e-6f)) {
-        return vector4_identity ();
-    }
+    if (!(len > 1.0e-6f)) { return vector4_identity (); }
     vector3 a = vector3_scaling (axis, 1.0f / len);
     float d = vector3_dot (from, a);
-    if (d > 0.999999f) {
-        return vector4_identity ();
-    }
+    if (d > 0.999999f) { return vector4_identity (); }
     if (d < -0.999999f) {
         /* Antiparallel: 180 deg about any axis perpendicular to +X. */
         return vector4_from_axis_with_angle ((vector3) {0.0f, 1.0f, 0.0f}, 3.14159265f);
@@ -196,34 +178,24 @@ static vector4 rb_orient_from_axis (vector3 axis) {
      * (1+d, c) which is already unit up to a scale of sqrt(2(1+d)). */
     vector3 c = vector3_cross (from, a);
     return vector4_normalisation ((vector4) {1.0f + d, c.x, c.y, c.z});
-}
-/* MFS-STRAFE-A forensics default (1 = analytic, 0 = articulated).
+} /* MFS-STRAFE-A forensics default (1 = analytic, 0 = articulated).
  * Declared early: creation reads it. */
 static int s_mecanum_analytic_default = MFS_MECANUM_ANALYTIC_DEFAULT;
 /* MPE_FTC_095: chassis-centre height where the wheels just touch floor y=0 */
-float ftc_robot_rest_height (void) {
-    return WHEEL_RADIUS - WHEEL_Y_OFFSET;
-}
+float ftc_robot_rest_height (void) {return WHEEL_RADIUS - WHEEL_Y_OFFSET;}
 int ftc_world_setup_field (physics_world *world, float mus, float muk) {
     /* DESPOT-FIX: was `return 1` on bad args — the only `1`-on-error in the
      * tree (everyone else uses 0 ok / -1 fail, and callers test `!= 0`).
      * 1 still failed the check, but mixed conventions hide failures from
      * `rc < 0` callers. Now -1 like the rest. */
-    if (!world) {
-        return -1;
-    }
-    if (mus < 0.0f || muk < 0.0f) {
-        return -1;
-    }
-    if (!isfinite (mus) || !isfinite (muk)) {
-        return -1;
-    }
+    if (!world) { return -1; }
+    if (mus < 0.0f || muk < 0.0f) { return -1; }
+    if (!isfinite (mus) || !isfinite (muk)) { return -1; }
     mpe_config_t *cfg = mpe_world_cfg_mut (world);
     if (cfg) {
         cfg -> world.floor_friction_s = mus;
         cfg -> world.floor_friction_k = muk;
-    }
-    world -> static_plane_enabled = true;
+    } world -> static_plane_enabled = true;
     world -> static_plane_body.friction_static = mus;
     world -> static_plane_body.friction_kinetic = muk;
     return 0;
@@ -234,16 +206,13 @@ int ftc_robot_create_with_drive (physics_world *world, ftc_robot *robot, float x
     /* DESPOT-FIX: was `return 1` on all fail paths (only 1-on-error in tree).
  * Callers test `!= 0` so behaviour is unchanged, but -1 matches every
  * other MFS fail return and is caught by `rc < 0` checks too. */
-    if ((!world) || (!robot)) {
-        return -1;
-    }
+    if ((!world) || (!robot)) { return -1; }
     memset (robot, 0, sizeof (ftc_robot));
     /* memset zeroes odom_x/z/theta and wheel_radians — no separate init needed */
     /* Traction scales start open (1.0); memset leaves 0.0 = fully cut. */
     for (int i = 0; i < FTC_MAX_WHEELS; i++) {
         robot -> wheel_traction_scale [i] = 1.0f;
-    }
-    robot -> motor_preset = preset;
+    } robot -> motor_preset = preset;
     robot -> drivetrain_type = drivetrain_type;
     /* MFS-STRAFE-A: analytic lateral defaults ON for mecanum only (tank
      * keeps plain cylinders + engine friction). Read at build time below. */
@@ -284,9 +253,7 @@ int ftc_robot_create_with_drive (physics_world *world, ftc_robot *robot, float x
     /* Chassis: a box at the given position */
     robot -> chassis_body = physics_world_add_cube (
         world, (vector3) {x, y, z}, (vector3) {CHASSIS_HALF_X, CHASSIS_HALF_Y, CHASSIS_HALF_Z}, CHASSIS_MASS);
-    if (robot -> chassis_body < 0) {
-        goto fail;
-    }
+    if (robot -> chassis_body < 0) { goto fail; }
     uint32_t chassis_id = world -> bodies [robot -> chassis_body].object_id;
     /* 4 wheels at corners */
     float wheel_positions [4][3] = {
@@ -342,9 +309,7 @@ int ftc_robot_create_with_drive (physics_world *world, ftc_robot *robot, float x
         robot -> wheel_bodies [i] =
             physics_world_add_cylinder (world, hub_radius, WHEEL_HALF_WIDTH, WHEEL_MASS,
                                         (vector3) {wheel_positions [i][0], wheel_positions [i][1], wheel_positions [i][2]});
-        if (robot -> wheel_bodies [i] < 0) {
-            goto fail;
-        }
+        if (robot -> wheel_bodies [i] < 0) { goto fail; }
         /* Grippy rubber on tile (was engine defaults ~0.3/0.2: glassy).
          * Contact mu = min(wheel, floor); the drivetrain budgets against
          * these same wheel materials (see drivetrain_update).
@@ -367,8 +332,7 @@ int ftc_robot_create_with_drive (physics_world *world, ftc_robot *robot, float x
         } else {
             world -> bodies [robot -> wheel_bodies [i]].friction_static = 0.9f;
             world -> bodies [robot -> wheel_bodies [i]].friction_kinetic = 0.7f;
-        }
-        world -> bodies [robot -> wheel_bodies [i]].restitution = 0.0f;
+        } world -> bodies [robot -> wheel_bodies [i]].restitution = 0.0f;
         uint32_t wheel_id = world -> bodies [robot -> wheel_bodies [i]].object_id;
         /* Revolute joint: chassis (body_a) to wheel (body_b), axle along X.
          * Anchor sits WHEEL_PRELOAD below exact touch (see above). */
@@ -378,12 +342,8 @@ int ftc_robot_create_with_drive (physics_world *world, ftc_robot *robot, float x
         vector3 axle_axis = {robot -> axle_axis_x, robot -> axle_axis_y, robot -> axle_axis_z};
         robot -> wheel_joints [i] =
             constraint_add_revolute (world, chassis_id, wheel_id, anchor_on_chassis, anchor_on_wheel, axle_axis);
-        if (robot -> wheel_joints [i] < 0) {
-            goto fail;
-        }
-        if (ncreated < (int) (sizeof (created_joints) / sizeof (created_joints [0]))) {
-            created_joints [ncreated++] = robot -> wheel_joints [i];
-        } else {
+        if (robot -> wheel_joints [i] < 0) { goto fail; }
+        if (ncreated < (int) (sizeof (created_joints) / sizeof (created_joints [0]))) { created_joints [ncreated++] = robot -> wheel_joints [i]; } else {
             goto fail; /* joint untrackable: unwind rather than leak */
         }
         /* MFS_PORT_V15S: roller geometry is robot-local state now (the
@@ -405,8 +365,7 @@ int ftc_robot_create_with_drive (physics_world *world, ftc_robot *robot, float x
             float side = (i % 2 == 0) ? 1.0f : -1.0f;
             float front_back = (i < 2) ? 1.0f : -1.0f;
             roller_angle = 0.785398f * side * front_back;
-        }
-        robot -> wheel_roller_angle [i] = roller_angle;
+        } robot -> wheel_roller_angle [i] = roller_angle;
         robot -> wheel_is_mecanum [i] = is_mecanum;
         /* Set up motor for this wheel */
         motor_preset_apply (&robot -> wheel_motors [i], preset);
@@ -503,9 +462,7 @@ int ftc_robot_create_with_drive (physics_world *world, ftc_robot *robot, float x
             int roller_count = 0;
             const vector3 wc = {wheel_positions [i][0], wheel_positions [i][1], wheel_positions [i][2]};
             const uint32_t wheel_id_w = world -> bodies [robot -> wheel_bodies [i]].object_id;
-            if (n_rollers > MFS_ROLLERS_PER_WHEEL) {
-                goto fail;
-            }
+            if (n_rollers > MFS_ROLLERS_PER_WHEEL) { goto fail; }
             for (int k = 0; k < n_rollers; k++) {
                 const int row = k / MECANUM_ROLLERS_PER_ROW;
                 const int rim = k % MECANUM_ROLLERS_PER_ROW;
@@ -524,9 +481,7 @@ int ftc_robot_create_with_drive (physics_world *world, ftc_robot *robot, float x
                 const vector3 rp = vector3_addition (wc, offset);
                 const int rb = physics_world_add_cylinder (world, MECANUM_ROLLER_RADIUS, MECANUM_ROLLER_HALF_LEN,
                                                            MECANUM_ROLLER_MASS, rp);
-                if (rb < 0) {
-                    goto fail;
-                }
+                if (rb < 0) { goto fail; }
                 /* Same rubber-on-tile material as the hub, so the contact mu
                  * the engine reduces over is the one the drivetrain budgets. */
                 world -> bodies [rb].friction_static = 0.9f;
@@ -569,22 +524,15 @@ int ftc_robot_create_with_drive (physics_world *world, ftc_robot *robot, float x
                 const uint32_t roller_id = world -> bodies [rb].object_id;
                 const int rj = constraint_add_revolute (world, wheel_id_w, roller_id, offset,
                                                         (vector3) {0.0f, 0.0f, 0.0f}, roller_axis);
-                if (rj < 0) {
-                    goto fail;
-                }
+                if (rj < 0) { goto fail; }
                 robot -> roller_joints [i][k] = rj;
-                if (ncreated < (int) (sizeof (created_joints) / sizeof (created_joints [0]))) {
-                    created_joints [ncreated++] = rj;
-                } else {
+                if (ncreated < (int) (sizeof (created_joints) / sizeof (created_joints [0]))) { created_joints [ncreated++] = rj; } else {
                     goto fail; /* joint untrackable: unwind rather than leak */
-                }
-                roller_count++;
-            }
-            robot -> roller_count [i] = roller_count;
+                } roller_count++;
+            } robot -> roller_count [i] = roller_count;
         }
 #endif
-    }
-    return 0;
+    } return 0;
     fail:
     /* Release exactly the joints this call created (creation order), then
      * rewind the append-only body pool. constraint_remove deactivates by
@@ -599,8 +547,7 @@ int ftc_robot_create_with_drive (physics_world *world, ftc_robot *robot, float x
     }
     for (int i = 0; i < FTC_MAX_WHEELS; i++) {
         robot -> wheel_joints [i] = -1;
-    }
-    memset (robot -> roller_joints, 0xFF, sizeof (robot -> roller_joints));
+    } memset (robot -> roller_joints, 0xFF, sizeof (robot -> roller_joints));
     if (world -> body_count > body_watermark) {
         world -> body_count = body_watermark;
         physics_world_bump_revision (world);
@@ -617,22 +564,16 @@ int ftc_robot_create_with_drive (physics_world *world, ftc_robot *robot, float x
      * struct agrees that the robot does not exist. */
     for (int i = 0; i < FTC_MAX_WHEELS; i++) {
         robot -> wheel_bodies [i] = -1;
-    }
-    memset (robot -> roller_bodies, 0xFF, sizeof (robot -> roller_bodies));
+    } memset (robot -> roller_bodies, 0xFF, sizeof (robot -> roller_bodies));
     for (int i = 0; i < FTC_MAX_WHEELS; i++) {
         robot -> roller_count [i] = 0;
-    }
-    robot -> chassis_body = -1;
+    } robot -> chassis_body = -1;
     robot -> wheel_count = 0;
     return -1;
 }
-int ftc_robot_create (physics_world *world, ftc_robot *robot, float x, float y, float z, motor_preset_id preset) {
-    return ftc_robot_create_with_drive (world, robot, x, y, z, preset, FTC_DRIVETRAIN_MECANUM);
-}
+int ftc_robot_create (physics_world *world, ftc_robot *robot, float x, float y, float z, motor_preset_id preset) {return ftc_robot_create_with_drive (world, robot, x, y, z, preset, FTC_DRIVETRAIN_MECANUM);}
 void ftc_robot_update (physics_world *world, ftc_robot *robot, float dt) {
-    if ((!world) || (!robot) || (dt <= 0.0f)) {
-        return;
-    }
+    if ((!world) || (!robot) || (dt <= 0.0f)) { return; }
     /* A commanded robot is awake by definition. Wake the chassis when any
      * wheel is commanded: motor vibration and driver intent keep a real
      * robot active, and the velocity integrator drains forces for sleeping
@@ -645,9 +586,7 @@ void ftc_robot_update (physics_world *world, ftc_robot *robot, float dt) {
             break;
         }
     }
-    if (any_command && robot -> chassis_body >= 0 && robot -> chassis_body < world -> body_count) {
-        rigidbody_wake (&world -> bodies [robot -> chassis_body]);
-    }
+    if (any_command && robot -> chassis_body >= 0 && robot -> chassis_body < world -> body_count) { rigidbody_wake (&world -> bodies [robot -> chassis_body]); }
     /* DESPOT-2026-10-04 idle-tire switch (see creation comment above):
      * driven analytic-mecanum wheels keep zeroed hub friction (analytic
      * lateral owns the contact); uncommanded ones get real 0.9/0.7 engine
@@ -671,15 +610,11 @@ void ftc_robot_update (physics_world *world, ftc_robot *robot, float dt) {
             float a = fabsf (robot -> wheel_motors [ci].command);
             if (a > idle_max)
                 idle_max = a;
-        }
-        int wi0 = (robot -> wheel_count > 0) ? robot -> wheel_bodies [0] : -1;
+        } int wi0 = (robot -> wheel_count > 0) ? robot -> wheel_bodies [0] : -1;
         int engaged = (wi0 >= 0 && wi0 < world -> body_count && world -> bodies [wi0].friction_static > 0.45f) ? 1 : 0;
-        if (!engaged && idle_max < 0.03f) {
-            engaged = 1;
-        } else if (engaged && idle_max > 0.08f) {
+        if (!engaged && idle_max < 0.03f) { engaged = 1; } else if (engaged && idle_max > 0.08f) {
             engaged = 0;
-        }
-        idle_tires = engaged;
+        } idle_tires = engaged;
         for (int ci = 0; ci < robot -> wheel_count; ci++) {
             if (!robot -> wheel_is_mecanum [ci])
                 continue;
@@ -705,9 +640,7 @@ void ftc_robot_update (physics_world *world, ftc_robot *robot, float dt) {
             const mpe_config_t *sleep_cfg = mpe_world_cfg (world);
             float lv2 = vector3_length_squared (chb -> velocity);
             float av2 = vector3_length_squared (chb -> angular_velocity);
-            if (lv2 > sleep_cfg -> sleep.linear_thresh_sq || av2 > sleep_cfg -> sleep.angular_thresh_sq) {
-                rigidbody_wake (chb);
-            }
+            if (lv2 > sleep_cfg -> sleep.linear_thresh_sq || av2 > sleep_cfg -> sleep.angular_thresh_sq) { rigidbody_wake (chb); }
         }
     }
     /* Sum currents for battery sag.
@@ -725,20 +658,41 @@ void ftc_robot_update (physics_world *world, ftc_robot *robot, float dt) {
     for (int i = 0; i < robot -> wheel_count; i++) {
         float c = robot -> wheel_motors [i].current;
         fuse_load += (c > 0.0f) ? c : -c;
-    }
-    battery_fuse_step (&robot -> battery, fuse_load, dt);
+    } battery_fuse_step (&robot -> battery, fuse_load, dt);
     float terminal_voltage = battery_get_voltage (&robot -> battery, total_current_signed);
     float drain_current = (total_current_signed > 0.0f) ? total_current_signed : 0.5f * total_current_signed;
-    if (drain_current < 0.0f && robot -> battery.charge_fraction >= 1.0f) {
-        drain_current = 0.0f;
-    }
+    if (drain_current < 0.0f && robot -> battery.charge_fraction >= 1.0f) { drain_current = 0.0f; }
     battery_drain (&robot -> battery, drain_current, dt);
     /* Update each wheel motor */
+    /* DESPOT-2026-10-14 (handling, yaw governor): sustained rotate integrates
+     * to unbounded spin — measured -13.5 rad/s over 20 s still creeping, with
+     * ~zero passive decay (-6.17 to -3.7 over 8 s unbraked) and a lift
+     * feedback past ~3.5-4 rad/s (chassis rises ~1 cm, contacts unload to the
+     * slop boundary, damping collapses further). Real yaw authority saturates
+     * (back-EMF + tire scrub); here nothing saturates in human timescales.
+     * Governor: delivered motor torque scales down past 3.0 rad/s, reaching
+     * the traction-cut floor (0.15) at 4.5. Same pattern as the wheel
+     * free-speed governor (motors cannot push past equilibrium), applied to
+     * ALL wheels equally so mixer directionality/anti-symmetry is preserved:
+     * drive_directions gates structure (|om|>0.2, sign flip, dominance), not
+     * magnitude — equal scaling preserves all three. Recorded magnitude
+     * comments (2.29 ramp average) may shift down; update them from the log
+     * if they do, never the gates. Tank peaks (1.2) never reach the band.
+     * Alone the governor only HALVED the runaway rate (drive cut to 0.15x
+     * leaves wheels spinning at free speed on contact-transmitted yaw) —
+     * dissipation, not just excitation cap, is required, hence the active
+     * damper below. Stateless (no struct change). */
+    float yaw_gov = 1.0f;
+    if (robot -> chassis_body >= 0 && robot -> chassis_body < world -> body_count) {
+        float yaw_abs = fabsf (world -> bodies [robot -> chassis_body].angular_velocity.y);
+        if (isfinite (yaw_abs) && yaw_abs > 3.0f) {
+            yaw_gov = 1.0f - (yaw_abs - 3.0f) * (0.85f / 1.5f);
+            if (yaw_gov < 0.15f) { yaw_gov = 0.15f; }
+        }
+    }
     for (int i = 0; i < robot -> wheel_count; i++) {
         int wheel_idx = robot -> wheel_bodies [i];
-        if ((wheel_idx < 0) || (wheel_idx >= world -> body_count)) {
-            continue;
-        }
+        if ((wheel_idx < 0) || (wheel_idx >= world -> body_count)) { continue; }
         rigidbody *wheel = &world -> bodies [wheel_idx];
         /* DESPOT-FIX: running radius, not plate radius. wheel->radius is
          * the hub PLATE (30 mm recessed on mecanum rollers); every lever
@@ -747,17 +701,14 @@ void ftc_robot_update (physics_world *world, ftc_robot *robot, float dt) {
          * Using the plate radius halved all inertias and broke the
          * observer/governor calibration the moment the plate recessed. */
         float r_run = wheel -> radius;
-        if (i >= 0 && i < FTC_MAX_WHEELS && robot -> wheel_effective_radius [i] > 0.001f) {
-            r_run = robot -> wheel_effective_radius [i];
-        }
+        if (i >= 0 && i < FTC_MAX_WHEELS && robot -> wheel_effective_radius [i] > 0.001f) { r_run = robot -> wheel_effective_radius [i]; }
         if (!(r_run > 0.001f) || !isfinite (r_run))
             r_run = wheel -> radius;
         /* Read wheel angular velocity about the actual rotated axle axis in world space */
         vector3 axle = wheel -> cached_axes [0];
         if (vector3_length_squared (axle) < 0.0001f) {
             axle = vector4_rotate_to_vector3 (wheel -> orientation, (vector3) {1.0f, 0.0f, 0.0f});
-        }
-        float wheel_speed = vector3_dot (wheel -> angular_velocity, axle);
+        } float wheel_speed = vector3_dot (wheel -> angular_velocity, axle);
         /* Disturbance observer: external load = measured net torque effect
          * minus last tick's explicit motor torque. At lock this converges
          * to -stall (full stall held); free, to 0. Clamped; NaN-safe.
@@ -801,8 +752,7 @@ void ftc_robot_update (physics_world *world, ftc_robot *robot, float dt) {
             if (vector3_length_squared (roll_dir) > 1e-6f) {
                 roll_dir = vector3_scaling (roll_dir, 1.0f / sqrtf (vector3_length_squared (roll_dir)));
                 w_expected = vector3_dot (v_contact, roll_dir) / r_run;
-            }
-            float slip = wheel_speed - w_expected;
+            } float slip = wheel_speed - w_expected;
             /* Cut ONLY overspeed (wheel outrunning travel = burnout).
              * Under-speed (skid/drag) keeps full torque so the wheel
              * spins UP to rolling speed; cutting there deadlocks the
@@ -818,11 +768,7 @@ void ftc_robot_update (physics_world *world, ftc_robot *robot, float dt) {
              * it, burnout regulation engages. Control theory, not a
              * test hack: never regulate on an unobservable error. */
             float dir = 0.0f;
-            if (w_expected > 0.5f) {
-                dir = 1.0f;
-            } else if (w_expected < -0.5f) {
-                dir = -1.0f;
-            }
+            if (w_expected > 0.5f) { dir = 1.0f; } else if (w_expected < -0.5f) { dir = -1.0f; }
             /* FIX-AUDIT-DESPOT: cut/recover thresholds (over > 4.0 rad/s
              * cuts to 0.15, recovers above 0.2/step while over < 2.0) are
              * TUNED HYSTERESIS, not derived constants: the 4.0/2.0 split
@@ -836,15 +782,58 @@ void ftc_robot_update (physics_world *world, ftc_robot *robot, float dt) {
              * calibrated drive behaviour, ugly or not. Do not re-attempt
              * without re-baselining tank + drive_directions first. */
             float *scale = &robot -> wheel_traction_scale [i];
+            int *hold = &robot -> wheel_cut_hold [i];
             float over = slip * dir;
-            if (dir != 0.0f && over > 4.0f) {
+            /* DESPOT-2026-10-14 (accuracy, anti-lock pulse): the slam fires
+             * immediately on over > 4.0 (directional purity depends on it —
+             * debouncing to 3 ticks broke drive_directions cross-talk and
+             * partial_throttle heading hold, reverted with cause). The
+             * companion defect is the latch: recovery needs over < 2.0, but
+             * cut torque itself sustains the spin it condemns, so over never
+             * dips and the wheel crawls at 0.15 forever (measured identical
+             * 0.690 m at cmd 0.25 and 0.50 — a deadlock, not a tune).
+             * hold counts ticks-since-slam while cut; every 20th tick the
+             * cut probes +0.2 regardless (re-slams next tick on genuine
+             * burnout, climbs out of the trap otherwise). Genuine burnout
+             * sees a 1/20 probe duty; the trap escapes in ~5 probes. */
+            if (*scale < 1.0f && fabsf (wheel_speed) < 2.0f) {
+                *scale = 1.0f;
+                *hold = 0;
+            } else if (dir != 0.0f && over > 4.0f) {
                 *scale = 0.15f;
-            } else if (*scale < 1.0f && over < 2.0f) {
-                *scale += 0.2f;
-                if (*scale > 1.0f) {
-                    *scale = 1.0f;
+                *hold = 0;
+            } else if (*scale < 1.0f) {
+                (*hold)++;
+                if (over < 2.0f || *hold >= 20) {
+                    *scale += 0.2f;
+                    if (*scale > 1.0f) { *scale = 1.0f; }
+                    if (*hold >= 20) { *hold = 0; }
                 }
             }
+            /* DESPOT-2026-10-12 (SKATE cut-trap): the cut regulates overspeed,
+             * but a wheel it has strangled sits near zero WITH the cut still
+             * engaged, and any torque that can break it away (needs ~cone)
+             * also peels a 2.5e-4 featherweight in one tick — so spool
+             * attempts re-slam faster than the +0.2 climb recovers, and the
+             * weakest wheel in an asymmetric (both-sticks) drive locks at
+             * 0.15 indefinitely (measured FR +0.23 cmd pinned 0.15 from tick
+             * 40 while drag back-drives it). A slow wheel is stuck, not
+             * peeling: release the cut outright below 2 rad/s surface-0.1
+             * m/s (slew still feathers delivery at 0.6/tick, so no step;
+             * genuine overspeed re-slams next tick by the rule below). Tank
+             * pivots spin fast, idle bypasses the cut, standstill starts at
+             * scale 1 already — none of the load-bearing slam regimes touch
+             * the slow case. NOTE: a further back-drive bypass (full
+             * authority whenever spin opposes command) was tried and
+             * REVERTED: delivery rose 0.74->1.00 with zero recovery (the
+             * implicit plan evaluates current at planned, not measured,
+             * speed, so far-from-target recovery torque never materializes
+             * — MOTOR-II territory, needs the bigger landing unit, not a
+             * cut tweak). The residual back-drive lock under extreme
+             * command spread stays open (bounded: thrust flips on at most
+             * the dragged wheel, mounts/P2P hold, nothing flips). The *scale
+             * release below 2 rad/s and the instant slam above 4.0 live in
+             * the pulse block above (with the 20-tick probe escape). */
         }
         /* Update motor electrical state.
          * DESPOT-2026-10-04 (idle/coast split): at ~zero command the wheel
@@ -862,16 +851,10 @@ void ftc_robot_update (physics_world *world, ftc_robot *robot, float dt) {
          * mecanum (all four switch together); other builds keep the
          * command threshold (their behavior is already green). */
         int idle_coast;
-        if (robot -> drivetrain_type == FTC_DRIVETRAIN_MECANUM && robot -> mecanum_analytic) {
-            idle_coast = idle_tires;
-        } else {
-            idle_coast = (fabsf (robot -> wheel_motors [i].command) < 0.05f) ? 1 : 0;
-        }
-        if (idle_coast) {
-            motor_update (&robot -> wheel_motors [i], wheel_speed, dt, terminal_voltage);
-        } else {
-            motor_update_load (&robot -> wheel_motors [i], wheel_speed, dt, terminal_voltage, axle_inertia);
-        }
+        if (robot -> brake) { idle_coast = 1; /* motor power = BRAKE: forced idle/regen regardless of the tire hysteresis */ }
+        else if (robot -> drivetrain_type == FTC_DRIVETRAIN_MECANUM && robot -> mecanum_analytic) { idle_coast = idle_tires; }
+        else { idle_coast = (fabsf (robot -> wheel_motors [i].command) < 0.05f) ? 1 : 0; }
+        if (idle_coast) { motor_update (&robot -> wheel_motors [i], wheel_speed, dt, terminal_voltage); } else { motor_update_load (&robot -> wheel_motors [i], wheel_speed, dt, terminal_voltage, axle_inertia); }
         /* Traction cut applies to delivered torque (both the axle drive
          * below and the traction loop in drivetrain_update read
          * output_torque). Electrical readings (current/rpm) stay
@@ -881,7 +864,54 @@ void ftc_robot_update (physics_world *world, ftc_robot *robot, float dt) {
          * brake 0.15-coasts it into uselessness while the contact solver
          * already cone-bounds whatever reaches the ground. */
         if (!idle_coast) {
-            robot -> wheel_motors [i].output_torque *= robot -> wheel_traction_scale [i];
+            /* Yaw stability damper (active counterpart to the governor
+             * above): a pure yaw couple opposing chassis spin, deadbanded
+             * below 3.0 rad/s and ramping to full by 4.5. Real tire scrub
+             * damps yaw passively; this plant's analytic tire under-provides
+             * it (roller-axis projection dilutes yaw slip ~11x, then the
+             * lift feedback unloads the patches entirely), so ESC-style
+             * active damping stands in. Differential (mirrored per side) =
+             * zero net force, pure moment — planar drive is untouched. Same
+             * deadband as the governor, so green gates (all sub-3.0) never
+             * see it; tank peaks at 1.2. */
+            float chiral = 0.0f;
+            if (robot -> chassis_body >= 0 && robot -> chassis_body < world -> body_count) {
+                float yaw_now = world -> bodies [robot -> chassis_body].angular_velocity.y;
+                if (isfinite (yaw_now)) {
+                    float yaw_mag = (yaw_now < 0.0f) ? -yaw_now : yaw_now;
+                    if (yaw_mag > 3.0f) {
+                        float ramp = (yaw_mag - 3.0f) / 1.5f;
+                        if (ramp > 1.0f) { ramp = 1.0f; }
+                        /* 0.6 N.m.s at full ramp: stops 0.27 kg.m^2 from
+                         * 4.5 rad/s in ~1 s against the measured residual
+                         * excitation (~0.2 N.m). */
+                        float moment = 0.6f * ramp * yaw_mag;
+                        float dd = moment * 0.05f / (4.0f * 0.24f);
+                        float sgn = (yaw_now >= 0.0f) ? 1.0f : -1.0f;
+                        /* Oppose: rotate+ pattern (left -, right +) drives
+                         * -yaw (measured), so it damps +yaw; mirrored for
+                         * -yaw. Verified by sign audit above. */
+                        chiral = ((i % 2) == 0) ? (-sgn * dd) : (sgn * dd);
+                    }
+                }
+            }
+            robot -> wheel_motors [i].output_torque *= robot -> wheel_traction_scale [i] * yaw_gov;
+            /* Damper applies AFTER the scales above (deliberately): the
+             * governor floor (0.15x) would neuter it exactly when it is
+             * needed most, and the traction cut must not regulate a
+             * stability torque (its peel logic reads wheel-vs-ground slip,
+             * which a yaw couple intentionally creates). Damper magnitude
+             * is cone-safe by construction (<=6.3 N/wheel vs ~15 N cone).
+             * DESPOT-FIX 2026-10-15: chiral was added twice — once before
+             * scaling (line above, scaled down by gov exactly when most
+             * needed) and once after. Removed the pre-scale addition; the
+             * post-scale add below is the only one, matching the comment.
+             * Double application over-damped at low yaw (gov/scale near 1:
+             * 2x chiral) and under-damped at high yaw (gov near 0.15: only
+             * 1.15x chiral), so the robot felt sluggish then snap-oversteer
+             * as the governor cut in. Single unscaled add gives consistent
+             * damping. */
+            robot -> wheel_motors [i].output_torque += chiral;
         }
         /* Apply motor torque along the actual physical axle in world space.
          * Free-speed governor: a motor cannot push its wheel past free
@@ -937,6 +967,17 @@ void ftc_robot_update (physics_world *world, ftc_robot *robot, float dt) {
                     prev = 0.0f;
                 float want = torque;
                 float dl = want - prev;
+                /* DESPOT-2026-10-12 (SKATE chatter granularity TRIED AND
+                 * REVERTED): 0.2 still clears the cone but kicks 3x softer
+                 * was the theory; measured it starves drive authority
+                 * instead (drive_directions fwd.vz/str.vx < 0.5 red, tank
+                 * pivot blown further to 3.04/0.127) while barely denting
+                 * chatter (overspeed fraction 0.36 -> 0.37 — the bursts are
+                 * contact stick-slip snaps on featherweight wheels, not
+                 * motor steps, so finer delivery cannot calm them). The 0.6
+                 * step that reaches stall in ~7 ticks is load-bearing for
+                 * launches; chatter amplitude stays an open plant item
+                 * (cone-budget feedforward, MOTOR-II). */
                 const float max_slew = 0.6f;
                 if (dl > max_slew)
                     want = prev + max_slew;
@@ -988,15 +1029,9 @@ void ftc_robot_update (physics_world *world, ftc_robot *robot, float dt) {
             if (gov_m -> kv > 0.0f && gov_m -> gear_ratio > 0.0f && isfinite (terminal_voltage) &&
                 terminal_voltage > 0.0f) {
                 float wv = terminal_voltage / (gov_m -> kv * gov_m -> gear_ratio) * 1.155f;
-                if (isfinite (wv) && wv > 0.0f) {
-                    wfree = wv;
-                }
+                if (isfinite (wv) && wv > 0.0f) { wfree = wv; }
             }
-            if (wfree > 0.0f && torque > 0.0f && wheel_speed > wfree) {
-                torque = 0.0f;
-            } else if (wfree > 0.0f && torque < 0.0f && wheel_speed < -wfree) {
-                torque = 0.0f;
-            }
+            if (wfree > 0.0f && torque > 0.0f && wheel_speed > wfree) { torque = 0.0f; } else if (wfree > 0.0f && torque < 0.0f && wheel_speed < -wfree) { torque = 0.0f; }
             /* DESPOT-2026-10-04 (governor foldback TRIED AND REVERTED):
              * ramping torque to zero across [wfree/1.155, wfree] instead of
              * the diode bang delayed the harsh-abuse tilt blowup slightly
@@ -1026,9 +1061,7 @@ void ftc_robot_update (physics_world *world, ftc_robot *robot, float dt) {
             float mfs_i_axle = 0.5f * wheel -> mass * r_run * r_run;
             if (mfs_i_axle > 0.0f) {
                 float mfs_max_brake = 0.5f * mfs_i_axle * fabsf (wheel_speed) / dt;
-                if (fabsf (torque) > mfs_max_brake) {
-                    torque = (torque > 0.0f) ? mfs_max_brake : -mfs_max_brake;
-                }
+                if (fabsf (torque) > mfs_max_brake) { torque = (torque > 0.0f) ? mfs_max_brake : -mfs_max_brake; }
             }
         }
         /* DESPOT-2026-10-02: bank the DELIVERED torque into the slew state
@@ -1062,9 +1095,7 @@ void ftc_robot_update (physics_world *world, ftc_robot *robot, float dt) {
          * contact-free) hub keeps running. */
         for (int k = 0; k < robot -> roller_count [i]; k++) {
             int rb = robot -> roller_bodies [i][k];
-            if (rb >= 0 && rb < world -> body_count) {
-                rigidbody_wake (&world -> bodies [rb]);
-            }
+            if (rb >= 0 && rb < world -> body_count) { rigidbody_wake (&world -> bodies [rb]); }
         }
 #if !defined(MECANUM_USE_RAIL_CONTACT)
         /* DESPOT-2026-09-26 QUASI-STATIC ROLLER BEARING (honest label).
@@ -1153,39 +1184,30 @@ void ftc_robot_update (physics_world *world, ftc_robot *robot, float dt) {
     }
 }
 void ftc_robot_set_wheel_commands (ftc_robot *robot, const float *commands, int count) {
-    if (!robot) {
-        return;
-    }
+    if (!robot) { return; }
     int n = (count < robot -> wheel_count) ? count : robot -> wheel_count;
     for (int i = 0; i < n; i++) {
         float cmd = commands [i];
-        if (cmd > 1.0f) {
-            cmd = 1.0f;
-        }
-        if (cmd < -1.0f) {
-            cmd = -1.0f;
-        }
+        if (cmd > 1.0f) { cmd = 1.0f; }
+        if (cmd < -1.0f) { cmd = -1.0f; }
         robot -> wheel_motors [i].command = cmd;
     }
 }
-void ftc_robot_set_mecanum_analytic_default (int on) {
-    s_mecanum_analytic_default = (on != 0) ? 1 : 0;
+void ftc_robot_set_brake (ftc_robot *robot, int on) {
+    if (!robot) { return; }
+    robot -> brake = (on != 0) ? 1 : 0;
+    if (robot -> brake) {
+        for (int i = 0; i < robot -> wheel_count; i++) {
+            robot -> wheel_motors [i].command = 0.0f;
+        }
+    }
 }
+void ftc_robot_set_mecanum_analytic_default (int on) {s_mecanum_analytic_default = (on != 0) ? 1 : 0;}
 void ftc_robot_get_position (physics_world *world, ftc_robot *robot, float *px, float *py, float *pz) {
-    if ((!world) || (!robot)) {
-        return;
-    }
+    if ((!world) || (!robot)) { return; }
     int idx = robot -> chassis_body;
-    if ((idx < 0) || (idx >= world -> body_count)) {
-        return;
-    }
-    if (px) {
-        *px = world -> bodies [idx].position.x;
-    }
-    if (py) {
-        *py = world -> bodies [idx].position.y;
-    }
-    if (pz) {
-        *pz = world -> bodies [idx].position.z;
-    }
+    if ((idx < 0) || (idx >= world -> body_count)) { return; }
+    if (px) { *px = world -> bodies [idx].position.x; }
+    if (py) { *py = world -> bodies [idx].position.y; }
+    if (pz) { *pz = world -> bodies [idx].position.z; }
 }

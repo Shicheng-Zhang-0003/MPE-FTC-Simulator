@@ -1,5 +1,13 @@
 # MFS — overarching module ecosystem ("mfs-simulator")
 
+> **Status 2026-10-09: the suite is 14/17, not green.** `tank`,
+> `drive_directions` and `odometry_yaw` are red from one root cause — the
+> global CCD obstacle margin added in commit `41bcc0b`, which perturbs
+> motion on a pivoting chassis. Zeroing it restores 17/17. Measurements and
+> the harness fix that made the failure visible at all are in
+> `docs/KNOWN_FAILURES.md` → `[CCD-OBSTACLE-MARGIN]`.
+> Any "15/15 green" wording below describes an earlier tree.
+
 > **Audit state (2026-10-06).** The yaw axis was audited by writing probes
 > that test the claims rather than reading them. The suite was 15/15 green
 > with ASan+UBSan clean while **the heading odometry had the opposite sign to
@@ -152,10 +160,16 @@ ecosystem/mfs/build_tests.sh --build-only
 ```
 
 Binaries and logs go to `../../temp/ftc_tests` by default (override with `OUTDIR=...`).
-The script also stages `mpe_ftc.so` at `src/plugins/` — the kernel loader
-only accepts `plugins/<name>.so` under its working directory, so that copy
-is what `mod load` and the hotload test use (same binary as
-`mfs/plugins/`; both gitignored build output). Test mains select via `-D`.
+The script also stages `mpe_ftc.so` at `ecosystem/mfs/plugins/`, which is
+what `mod load ecosystem/mfs/plugins/mpe_ftc.so` and the hotload test use
+(gitignored build output). Test mains select via `-D`.
+
+> **Corrected 2026-10-09.** This text used to say the loader "only accepts
+> `plugins/<name>.so`". That is no longer true, and `src/plugins/` no longer
+> exists: the loader now jails to **`ecosystem/`** at any nesting depth, and
+> the former top-level `plugins/` directory was removed as part of the
+> ecosystem consolidation. Load the plugin from its `ecosystem/mfs/plugins/`
+> path.
 
 Standalone, from a bare 461-MFS checkout (dual-mode since 2026-09-28 —
 same file, auto-discovers the engine via `$MFS_ENGINE_SRC` or sibling
@@ -187,10 +201,14 @@ START toggles control, LB+RB e-stop; sticks-centered is stopped. There is
 no terminal drive — `ftc drive`/`stop` were removed when the pad took over
 (all motion is `drivetrain_mecanum`).
 
+Camera: `ftc view 0` = free camera (default), `ftc view 1` = field-centric
+follow (tracks the robot's position, view keeps the field's orientation),
+`ftc view 2` = robot-centric chase (sits behind the robot and yaws with it).
+
 Lower level (single module instead of the bundle):
 
 ```
-mod load plugins/mpe_ftc.so
+mod load ecosystem/mfs/plugins/mpe_ftc.so
 mod ls                      # -> ftc-fleet-1.0 [generic]
 mod attach ftc-fleet        # per-world fleet allocated on primary
 ```
@@ -242,7 +260,7 @@ physics_world_detach_module(world, "ftc-fleet");
   bodies/joints are built (6 bodies / 4 joints). This replaces the
   retired chassis-force era AND the articulated 32-roller build (kept
   behind `ftc_robot_set_mecanum_analytic_default(0)` for forensics):
-  strafe +X 2.2250 m in 3 s vs 0.30 m gated; diagonal (0.5,0.5) composes
+  strafe right (−X, the robot's right) 2.2282 m in 180 ticks vs 0.30 m gated; diagonal (0.5,0.5) composes
   (DESPOT-2026-10-06: this figure has now been documented three times and
   drifted twice. It was 3.40 m (a stale source comment), then 2.2872 m
   (measured), and is 2.2250 m as of the v_ref change. `mfs_suite mecanum`
