@@ -316,7 +316,7 @@ odometry_diag:MFS_ODOM_DIAG"
 '; continue; fi
     if "$TEST_CC" $CFLAGS -I"$MFS/tests" -D"$def" "$src" $FTC "$MFS/mfs_internal.c" $CORE "$MOD1_OBJ" "$GAMEPAD_OBJ" \
          -lm $DL_LIBS $RDYNAMIC $PTHREAD $WIN_LIBS -o "$OUT/$base$EXE_EXT" 2>"$OUT/$base.build.log"; then
-      echo "[BUILD-OK] $base"; pass=$((pass+1))
+      echo "[INFO] $base (diagnostic, ungated)"; info_pass=$((info_pass+1))
     else
       echo "[BUILD-FAIL] $base"; fail=$((fail+1)); head -n 10 "$OUT/$base.build.log"
     fi
@@ -324,7 +324,7 @@ odometry_diag:MFS_ODOM_DIAG"
 '
   done
   IFS="$OLDIFS"
-  info_pass=$((info_pass + 12))
+  info_pass=$((info_pass))
 fi
 
 echo "FTC RESULT: gated pass=$pass fail=$fail info-diags=$info_pass (ungated)"
