@@ -314,6 +314,15 @@ odometry_diag:MFS_ODOM_DIAG"
     src="$MFS/tests/$base.c"
     if [ ! -f "$src" ]; then echo "[SKIP] $base (missing)"; IFS='
 '; continue; fi
+    # DESPOT-2026-10-19: these 12 legacy reference builds were counted TWICE
+    # -- once as gated `[BUILD-OK]` (pass++) and once as a hardcoded
+    # info-diags+=12 -- while no `[INFO]` marker was ever printed. The test
+    # runner's info-count contract compares per-case INFO rows against the
+    # summary, so the summary's "info-diags=12" was a lie with no per-case
+    # evidence. They are diagnostics (TESTING.md reference implementations),
+    # not gated coverage: print a real [INFO] marker and count them once.
+    # A build failure stays a gated failure -- the reference implementations
+    # are only meaningful while they compile.
     if "$TEST_CC" $CFLAGS -I"$MFS/tests" -D"$def" "$src" $FTC "$MFS/mfs_internal.c" $CORE "$MOD1_OBJ" "$GAMEPAD_OBJ" \
          -lm $DL_LIBS $RDYNAMIC $PTHREAD $WIN_LIBS -o "$OUT/$base$EXE_EXT" 2>"$OUT/$base.build.log"; then
       echo "[INFO] $base (diagnostic, ungated)"; info_pass=$((info_pass+1))
@@ -324,7 +333,6 @@ odometry_diag:MFS_ODOM_DIAG"
 '
   done
   IFS="$OLDIFS"
-  info_pass=$((info_pass))
 fi
 
 echo "FTC RESULT: gated pass=$pass fail=$fail info-diags=$info_pass (ungated)"
