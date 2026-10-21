@@ -454,9 +454,9 @@ static void drivetrain_odometry_update (physics_world *world, ftc_robot *robot, 
              * run) — the (int) cast is then IMPLEMENTATION-DEFINED out of
              * domain and the NaN/Inf guard below could never see it
              * through the new_count. Hold the previous count beyond the
-             * representable ceiling; a real odometer would long since
-             * have sleeped its accumulator (hardware wraps, we choose to
-             * hold and let every consumer see no motion).
+             * representable ceiling; a real odometer counter would long
+             * since have overflowed and wrapped (hardware wraps, we
+             * choose to hold and let every consumer see no motion).
              * ceiling = 2^31-1 minus a round-off margin. */
             int new_count = robot -> wheel_encoder_counts [i];
             if (exact > 2147000000.0f) {
