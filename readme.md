@@ -1,5 +1,7 @@
 # MFS — overarching module ecosystem ("mfs-simulator")
 
+## Made with a fear of FTC mecanum drive going wrong in my actual team...
+
 > **Status 2026-10-09: the suite is 14/17, not green.** `tank`,
 > `drive_directions` and `odometry_yaw` are red from one root cause — the
 > global CCD obstacle margin added in commit `41bcc0b`, which perturbs
