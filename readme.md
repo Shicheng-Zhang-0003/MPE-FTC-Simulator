@@ -1,62 +1,10 @@
-# MFS — overarching module ecosystem ("mfs-simulator")
+# MPE-FTC-Simulator, or the MFS Kernel Module Ecosystem
 
-## Made with a fear of FTC mecanum drive going wrong in my actual team...
+<img width="4426" height="1820" alt="Screenshot from 2026-10-25 15-22-26" src="https://github.com/user-attachments/assets/64ca3c88-6277-432a-99af-7337b0057dfc" />
+<img width="4426" height="1820" alt="Screenshot from 2026-10-25 15-22-37" src="https://github.com/user-attachments/assets/0a4e9f18-9e59-40ed-8983-2c686ee6c3a9" />
+<img width="4426" height="1820" alt="Screenshot from 2026-10-25 15-23-32" src="https://github.com/user-attachments/assets/6f007f31-c694-4ecf-8c0a-be3fce8d633d" />
+<img width="4426" height="1820" alt="Screenshot from 2026-10-25 15-25-26" src="https://github.com/user-attachments/assets/399685fc-6c07-4997-82f0-2d5ca4772981" />
 
-> **Status 2026-10-09: the suite is 14/17, not green.** `tank`,
-> `drive_directions` and `odometry_yaw` are red from one root cause — the
-> global CCD obstacle margin added in commit `41bcc0b`, which perturbs
-> motion on a pivoting chassis. Zeroing it restores 17/17. Measurements and
-> the harness fix that made the failure visible at all are in
-> `docs/KNOWN_FAILURES.md` → `[CCD-OBSTACLE-MARGIN]`.
-> Any "15/15 green" wording below describes an earlier tree.
-
-> **Audit state (2026-10-06).** The yaw axis was audited by writing probes
-> that test the claims rather than reading them. The suite was 15/15 green
-> with ASan+UBSan clean while **the heading odometry had the opposite sign to
-> the chassis on both drivetrains**, and **no test in the tree read
-> `odom_theta`, `odom_slip` or `clamp_events` at all** — that coverage hole
-> is the real defect. Both bugs are fixed and gated; the coverage hole is
-> closed with a new `odometry_yaw` case that produces 4 failures when the
-> original defects are reintroduced and 0 with the fix. The only yaw
-> measurement in the suite was also **aliasing**: it differenced two
-> `atan2(quaternion)` values and wrapped into `[-pi,pi]`, which folds any
-> real rate above `pi` rad/s to a small plausible number *and inverts its
-> sign* — so the gate written to catch rotate-directionality was passing on an
-> artefact. Now integrates `angular_velocity.y*dt`, which cannot alias.
-> A registry self-detach deadlock was also fixed and gated (`registry`);
-> `mfs_internal.c` had never been linked into the suite at all.
-> One frontier is **open, not fixed**: a full-power mecanum pivot runs ~3.5x
-> past the kinematic ceiling. Root cause is structural (analytic-mode hubs
-> ship zero friction, so there is no longitudinal traction path) and every
-> cheap bound tested either failed or destroyed the F1 strafe. It is ticketed
-> as `[MECANUM-PIVOT]` with its elimination table. Suite **17 gated, 17/17**.
-
-> **Audit state (2026-10-05).** The 2026-10-02 drift recurred with the
-> guard working correctly and nobody reading it. This tree had again fallen
-> behind its twin at `475-MPE/v15S/src/ecosystem/mfs`, now by 19 files of
-> real content: the idle-tire hold and hysteretic wheel brake, the motor
-> explicit-path load fix, the 128-iteration spawn floor and 30 m field, and
-> the fifteenth gate. Byte drift was reported on 47 files, but 28 of those
-> were the engine tree's tree-wide clang-format pass and nothing else — a
-> reformat larger than the change. Normalising comments and whitespace and
-> comparing token streams showed every one of the 19 was an insertion on the
-> twin's side and none ran the other way, so the twin was a strict superset
-> and the direction was unambiguous rather than guessed. Mirrored all 54
-> shared files twin → this tree; no file added, none removed. Suite **15
-> gated, 15/15**, and 15/15 again under ASan+UBSan with leak detection on.
-> `docs/SYNC_CONTRACT.md` records the method and adds a clause for it.
-
-> **Audit state (2026-10-02).** This tree had silently drifted 11 files behind
-> its twin at `475-MPE/v15S/src/ecosystem/mfs`, including four gated tests it
-> did not contain, because `sync_mfs_check.sh` — advertised in
-> `docs/SYNC_CONTRACT.md` as usable from this root — could not locate the twin
-> from here and exited with the same status as real drift. The drift guard is
-> fixed and now reports three distinct outcomes (in sync / drift / **did not
-> run**); the drift was mirrored (the twin was verified to be a strict
-> superset, so nothing was lost); and `.gitignore` was added after finding 13
-> build artifacts tracked since the initial import. Suite is now **15 gated
-> tests, 15/15**, clean under ASan+UBSan. See `docs/KNOWN_FAILURES.md` for the
-> full ledger.
 
 Everything MFS-wise lives under this folder: modules and submodules
 contained within the overarching MFS module ecosystem. (Previously
