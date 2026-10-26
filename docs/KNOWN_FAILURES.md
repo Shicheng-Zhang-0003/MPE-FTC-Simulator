@@ -570,11 +570,11 @@ measured, not estimated; the probe programs live in `temp/audit/`.
 - **The sync checker could never run from the tree it was advertised for.**
   `docs/SYNC_CONTRACT.md` states "a local copy also lives at this repo's root
   (`./sync_mfs_check.sh`) for standalone use." It could not work there. The
-  path resolution was `ROOT="$HERE/.."` then `EMBED="$ROOT/v15S/src/ecosystem/mfs"`,
+  path resolution was `ROOT="$HERE/.."` then `EMBED="$ROOT/v16R1/src/ecosystem/mfs"`,
   which is right when the script sits at `<475>/tools/` but not when it sits at
   the 461 root: there `HERE/..` is the shared *parent* directory, so it
-  searched for `…/projects/v15S/src/ecosystem/mfs` instead of
-  `…/projects/475-MPE/v15S/src/ecosystem/mfs`. Every standalone run died with
+  searched for `…/projects/v16R1/src/ecosystem/mfs` instead of
+  `…/projects/475-MPE/v16R1/src/ecosystem/mfs`. Every standalone run died with
   "embedded not found" and exit 1 — a status that reads like a misconfiguration,
   not like blindness.
 - **The drift it existed to catch was present.** This tree was last committed
@@ -1006,7 +1006,7 @@ While A/B-ing this, `mfs_suite --all` appeared to report `[FAIL] ftc_hotload`
 while the QA runner reported `[PASS]`, which looked exactly like a false green
 in `tools/test_runner.py`. It was not: `ftc_hotload` is sensitive to the
 working directory, and the failing run had been launched from the project root
-instead of `v15S/src/ecosystem/mfs`. Run from the correct cwd it passes
+instead of `v16R1/src/ecosystem/mfs`. Run from the correct cwd it passes
 deterministically (3/3). The runner was correct; the ad-hoc invocation was
 wrong. The genuine (much smaller) weakness is that `ftc_hotload` prints
 `[FAIL] ftc_hotload (failures=N)` with no reason, so a genuine failure of that

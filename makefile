@@ -1,13 +1,13 @@
 # MFS overarching module ecosystem ("mfs-simulator")
 #
 # DUAL-MODE (DESPOT-2026-09-28): this file is SOURCE-IDENTICAL in both trees
-# (standalone 461-MFS root and embedded 475-MPE/v15S/src/ecosystem/mfs/).
+# (standalone 461-MFS root and embedded 475-MPE/v16R1/src/ecosystem/mfs/).
 # MPE_SRC auto-detects the engine tree; override with
-#   make MPE_SRC=/path/to/475-MPE/v15S/src
+#   make MPE_SRC=/path/to/475-MPE/v16R1/src
 # or MFS_ENGINE_SRC env. Standalone default assumes the sibling layout
 #   projects/461-MFS + projects/475-MPE (same parent folder).
 #
-# Location (embedded): v15S/src/ecosystem/mfs/  (under the kernel MEI tree)
+# Location (embedded): v16R1/src/ecosystem/mfs/  (under the kernel MEI tree)
 # Full map: see readme.md
 #
 # Include convention (location-independent, do not use ../ crosses):
@@ -30,12 +30,12 @@
 ifeq ($(origin MPE_SRC),undefined)
   ifneq ($(wildcard ../../core/physics_world.c),)
     MPE_SRC = ../..
-  else ifneq ($(wildcard ../475-MPE/v15S/src/core/physics_world.c),)
-    MPE_SRC = ../475-MPE/v15S/src
+  else ifneq ($(wildcard ../475-MPE/v16R1/src/core/physics_world.c),)
+    MPE_SRC = ../475-MPE/v16R1/src
   else ifneq ($(MFS_ENGINE_SRC),)
     MPE_SRC = $(MFS_ENGINE_SRC)
   else
-    $(error MPE engine not found. Run make from v15S/src/ecosystem/mfs, or set MPE_SRC=/path/to/475-MPE/v15S/src (sibling layout projects/461-MFS + projects/475-MPE also works))
+    $(error MPE engine not found. Run make from v16R1/src/ecosystem/mfs, or set MPE_SRC=/path/to/475-MPE/v16R1/src (sibling layout projects/461-MFS + projects/475-MPE also works))
   endif
 endif
 MFS = .

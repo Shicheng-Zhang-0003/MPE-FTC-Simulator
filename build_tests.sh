@@ -1,23 +1,23 @@
 #!/usr/bin/env bash
 # MFS overarching ecosystem: FTC/robotics test build + run (v2).
-# Everything MFS-wise lives under v15S/src/ecosystem/mfs/ (modules,
-# submodules, tests, docs). Run from v15S/src:
+# Everything MFS-wise lives under v16R1/src/ecosystem/mfs/ (modules,
+# submodules, tests, docs). Run from v16R1/src:
 #   ecosystem/mfs/build_tests.sh [--build-only]
 # Windows: runs on MSYS2 bash (native .dll/.exe produced, runnable without
 # MSYS2). Linux behaviour unchanged.
 #
 # DUAL-MODE (DESPOT-2026-09-28): this file is SOURCE-IDENTICAL in both trees
-# (standalone 461-MFS root and embedded 475-MPE/v15S/src/ecosystem/mfs/).
+# (standalone 461-MFS root and embedded 475-MPE/v16R1/src/ecosystem/mfs/).
 # It auto-detects which tree it lives in and where the engine sources are:
 #
 #   embedded:   $MFS/../../core/physics_world.c exists -> SRC=$MFS/../..
-#   standalone: $MFS_ENGINE_SRC env, else sibling ../475-MPE/v15S/src,
+#   standalone: $MFS_ENGINE_SRC env, else sibling ../475-MPE/v16R1/src,
 #               else fail fast with the fix (not a gcc wall).
 #
 # Canonical invocations:
-#   cd <475-MPE>/v15S/src && ecosystem/mfs/build_tests.sh [--build-only]
+#   cd <475-MPE>/v16R1/src && ecosystem/mfs/build_tests.sh [--build-only]
 #   461-MFS/build_tests.sh [--build-only]   (needs the 475 engine alongside,
-#       or MFS_ENGINE_SRC=/path/to/v15S/src)
+#       or MFS_ENGINE_SRC=/path/to/v16R1/src)
 #
 # All MFS file references below are ABSOLUTE ($MFS/...) so the script works
 # from any CWD; engine CORE files are absolute ($SRC/...) for the same
@@ -35,15 +35,15 @@ else
     MODE="standalone"
     CAND="${MFS_ENGINE_SRC:-}"
     if [ -z "$CAND" ]; then
-        CAND="$(cd "$MFS/../475-MPE/v15S/src" 2>/dev/null && pwd || true)"
+        CAND="$(cd "$MFS/../475-MPE/v16R1/src" 2>/dev/null && pwd || true)"
     fi
     if [ -n "$CAND" ] && [ -f "$CAND/core/physics_world.c" ]; then
         SRC="$CAND"
     else
         echo "[BUILD-FAIL] engine tree not found (standalone MFS needs the 475 engine)" >&2
-        echo "  looked at: \$MFS_ENGINE_SRC, $MFS/../475-MPE/v15S/src" >&2
-        echo "  fix: MFS_ENGINE_SRC=/path/to/475-MPE/v15S/src $0 $*" >&2
-        echo "  or run the embedded copy: cd <475-MPE>/v15S/src && ecosystem/mfs/build_tests.sh" >&2
+        echo "  looked at: \$MFS_ENGINE_SRC, $MFS/../475-MPE/v16R1/src" >&2
+        echo "  fix: MFS_ENGINE_SRC=/path/to/475-MPE/v16R1/src $0 $*" >&2
+        echo "  or run the embedded copy: cd <475-MPE>/v16R1/src && ecosystem/mfs/build_tests.sh" >&2
         exit 2
     fi
     OUT="${OUTDIR:-$MFS/temp/ftc_tests}"
@@ -106,8 +106,8 @@ cd "$SRC" || { echo "[BUILD-FAIL] cannot cd to engine SRC=$SRC" >&2; exit 2; }
 # Engine-tree guard (embedded already proven above; standalone proven by
 # discovery): fail fast with the fix, not a gcc wall.
 if [ ! -f "$SRC/core/physics_world.c" ] || [ ! -d "$MFS/modules/ftc" ]; then
-    echo "[BUILD-FAIL] not an engine tree (expected v15S/src layout at $SRC)" >&2
-    echo "  run from v15S/src: ecosystem/mfs/build_tests.sh" >&2
+    echo "[BUILD-FAIL] not an engine tree (expected v16R1/src layout at $SRC)" >&2
+    echo "  run from v16R1/src: ecosystem/mfs/build_tests.sh" >&2
     exit 2
 fi
 pass=0; fail=0; info_pass=0
@@ -282,7 +282,7 @@ done
 # ENGINE-RELATIVE path. Built from the standalone tree that resolves through
 # -I$SRC against the 475 TWIN's copy of the header, not this tree's (confirmed
 # with gcc -H: it picked
-# ../475-MPE/v15S/src/ecosystem/mfs/tests/mfs_test_common.h). Benign only
+# ../475-MPE/v16R1/src/ecosystem/mfs/tests/mfs_test_common.h). Benign only
 # because the two files are byte-identical today -- exactly the cross-tree
 # coupling SYNC_CONTRACT.md exists to prevent, waiting for the trees to
 # diverge. Includes are now same-directory.

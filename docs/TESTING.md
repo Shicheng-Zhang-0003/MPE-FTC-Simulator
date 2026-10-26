@@ -82,7 +82,7 @@ From the engine tree (canonical — this is what CI and the release ritual
 use), with an MFS-rooted `OUTDIR` if desired:
 
 ```
-cd <475-MPE>/v15S/src
+cd <475-MPE>/v16R1/src
 ecosystem/mfs/build_tests.sh            # full suite
 ecosystem/mfs/build_tests.sh --build-only
 OUTDIR=/tmp/mfs_out ecosystem/mfs/build_tests.sh
@@ -97,7 +97,7 @@ is forced to `disabled` (no `/dev/input/js0` probing on headless boxes).
 **Standalone (FIXED 2026-09-28, was "does not run from a bare checkout"):** 
 `build_tests.sh` and the `Makefile` are dual-mode — source-identical in both
 trees, auto-detecting the engine (`$MFS_ENGINE_SRC`, else sibling
-`../475-MPE/v15S/src`, else fail-fast with the fix). From a bare 461-MFS
+`../475-MPE/v16R1/src`, else fail-fast with the fix). From a bare 461-MFS
 checkout: `./build_tests.sh [--build-only]` and `make && make test` both
 work (suite runs 17/17, outputs under `461-MFS/temp/`). The engine-tree
 invocation above remains canonical for CI/release.

@@ -5,7 +5,7 @@
  * tile-friction floor slab (mass-0, top y=0, mu_s=1.0/mu_k=0.8, e=0).
  * Running drive tests floorless measured only slip-regime artifacts
  * (wheel RPM split [13,40,481,79], -0.95 m strafe drag, sunk chassis).
- * Include as "mfs_test_common.h" (runs from v15S/src).
+ * Include as "mfs_test_common.h" (runs from v16R1/src).
  */
 #include <math.h>
 #include "core/physics_world.h"

@@ -1,7 +1,7 @@
 # MFS Sync Contract (standalone 461 ↔ embedded 475 copy)
 
 This repo (`461-MFS`) and the vendored copy at
-`475-MPE/v15S/src/ecosystem/mfs/` are the **same source tree twice**.
+`475-MPE/v16R1/src/ecosystem/mfs/` are the **same source tree twice**.
 There is no subtree, submodule, or merge mechanism between them — only
 this contract plus a checker script. Read this before editing either side.
 
@@ -46,10 +46,10 @@ paths so a green result is attributable to a specific pair of trees.
 
 Exit 2 exists because of the failure this contract failed to catch for its
 whole life (DESPOT-2026-10-02). The standalone copy originally resolved the
-embedded tree as `$HERE/../v15S/src/ecosystem/mfs`, which is correct from
+embedded tree as `$HERE/../v16R1/src/ecosystem/mfs`, which is correct from
 `<475>/tools/` but wrong from the 461 root — there `HERE/..` is the shared
-parent directory, so it looked for `…/projects/v15S/…` instead of
-`…/projects/475-MPE/v15S/…`. Every standalone run exited 1 with
+parent directory, so it looked for `…/projects/v16R1/…` instead of
+`…/projects/475-MPE/v16R1/…`. Every standalone run exited 1 with
 "embedded not found", a status indistinguishable from real drift, and the
 drift was in fact present and undetected: this tree had drifted 11 files
 behind its twin, including four gated tests that did not exist here. **A
@@ -58,7 +58,7 @@ guard that cannot tell "no drift" from "did not look" is not a guard.**
 ## Mirroring (when the checker fails)
 
 ```bash
-SRC=.../475-MPE/v15S/src/ecosystem/mfs
+SRC=.../475-MPE/v16R1/src/ecosystem/mfs
 DST=.../461-MFS
 for f in $(cd $SRC && git status --short . | awk '{print $2}'); do
   cp "$SRC/$f" "$DST/$f"
@@ -181,7 +181,7 @@ content difference at all -- which is a confusing report and trains people to
 ignore it.
 
 KNOWN LIMIT OF THE GUARD, recorded rather than fixed. Path resolution
-ends in a shallow glob over \`*/v15S/src/ecosystem/mfs\`, which will bind
+ends in a shallow glob over \`*/v16R1/src/ecosystem/mfs\`, which will bind
 to any stale scratch tree that happens to match. At least seven exist
 under \`/tmp/opencode\` (\`orig/\`, \`mpe/\`, \`v15base/\`, \`v15chk/\`,
 \`v15fmt/\`, \`v9a/\`, \`v9b/\`, \`v9fmt/\`). The explicit sibling candidate

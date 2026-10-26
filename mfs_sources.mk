@@ -1,5 +1,5 @@
 # Canonical file lists (engine-relative paths). build_tests.sh embeds
-# copies (MFS_ lists are MFS-relative there since it compiles from v15S/src
+# copies (MFS_ lists are MFS-relative there since it compiles from v16R1/src
 # with an ecosystem/mfs/ prefix) — update both files together.
 # The Makefile builds thin MFS-only .so files and needs no engine objects.
 MFS_ENGINE_SRCS = core/physics_world.c core/rigidbody.c \
