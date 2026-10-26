@@ -47,6 +47,15 @@ typedef struct {
      * shot. ftc_shoot_* also mirror the fired values here. */
     float aim_power;
     float aim_elev;
+    /* Hive-entry aim-solve cache (ftc_aim_params_solve): pose the last
+     * solve ran at + its result. aim_solve_ok = -1 (no entering arc at
+     * this pose, cached so re-asks are free), 0 (valid pair), 1 (stale/
+     * never run). Pose key: muzzle xyz (0.35 m cells) + yaw (5 deg). */
+    float solve_muzzle [3];
+    float solve_yaw;
+    float solve_mouth [3]; /* target mouth centre at solve time (tips re-pose cells) */
+    int solve_ok;                /* -1 no-arc cached, 0 valid pair cached, 1 stale */
+    float solve_power, solve_elev;
 } ftc_fleet_t;
 void *ftc_fleet_create (void) {
     ftc_fleet_t *f = (ftc_fleet_t *) calloc (1, sizeof (ftc_fleet_t));
@@ -60,11 +69,13 @@ void *ftc_fleet_create (void) {
     /* Poison id slots: 0 must never read as a live body id. */
     memset (f -> ball_ids, 0xFF, sizeof (f -> ball_ids));
     memset (f -> bucket_part_ids, 0xFF, sizeof (f -> bucket_part_ids));
-    /* Predictor defaults: full power, stock elevation. */
+    /* Predictor defaults: full power, configured elevation (menu-tunable,
+     * stock 65). */
     f -> last_shot_power = 1.0f;
-    f -> last_shot_elev = 50.0f;
+    f -> last_shot_elev = intake_launch_elev_default ();
     f -> aim_power = 1.0f;
-    f -> aim_elev = 50.0f;
+    f -> aim_elev = intake_launch_elev_default ();
+    f -> solve_ok = 1; /* solve cache cold (calloc zero would read as "cached ok") */
     return f;
 }
 void ftc_fleet_destroy (void *fleet_state) {
@@ -198,9 +209,10 @@ int ftc_fleet_clear (struct physics_world *world) {
     f -> bucket_cz = 0.0f;
     memset (&f -> bb, 0, sizeof (f -> bb));
     f -> last_shot_power = 1.0f;
-    f -> last_shot_elev = 50.0f;
+    f -> last_shot_elev = intake_launch_elev_default ();
     f -> aim_power = 1.0f;
-    f -> aim_elev = 50.0f;
+    f -> aim_elev = intake_launch_elev_default ();
+    f -> solve_ok = 1; /* the scene cleared under the solve cache */
     return 0;
 }
 /* Controlled-robot selection (per world; terminal `ftc select`, gamepad
@@ -380,11 +392,12 @@ int ftc_shoot (struct physics_world *world, int index) {
     if (!world || !r) { return -1; }
     rigidbody *ch = fleet_chassis (world, r);
     if (!ch) { return -1; }
-    int id = intake_shoot (world, ch -> position, ch -> orientation, ch -> velocity, r -> intake_balls,
-                           &r -> intake_count);
+    float elev = intake_launch_elev_default ();
+    int id = intake_shoot_aimed (world, ch -> position, ch -> orientation, ch -> velocity, r -> intake_balls,
+                                 &r -> intake_count, 1.0f, elev);
     if (id >= 0) {
         fprintf (stderr, "[bucketball] fired ball id=%d\n", id);
-        if (f) { f -> aim_power = 1.0f; f -> aim_elev = 50.0f; }
+        if (f) { f -> aim_power = 1.0f; f -> aim_elev = intake_launch_elev_default (); }
     }
     return id;
 }
@@ -394,16 +407,17 @@ int ftc_shoot_power (struct physics_world *world, int index, float power) {
     if (!world || !r) { return -1; }
     rigidbody *ch = fleet_chassis (world, r);
     if (!ch) { return -1; }
-    int id = intake_shoot_power (world, ch -> position, ch -> orientation, ch -> velocity, r -> intake_balls,
-                                 &r -> intake_count, power);
+    float elev = intake_launch_elev_default ();
+    int id = intake_shoot_aimed (world, ch -> position, ch -> orientation, ch -> velocity, r -> intake_balls,
+                                 &r -> intake_count, power, elev);
     if (id >= 0) {
         fprintf (stderr, "[bucketball] fired ball id=%d power=%.2f\n", id, power);
         if (f) {
             float ap = isfinite (power) ? power : 1.0f;
-            if (ap < 0.3f) { ap = 0.3f; }
+            if (ap < intake_launch_power_min ()) { ap = intake_launch_power_min (); }
             if (ap > 1.0f) { ap = 1.0f; }
             f -> aim_power = ap;
-            f -> aim_elev = 50.0f;
+            f -> aim_elev = intake_launch_elev_default ();
         }
     }
     return id;
@@ -415,9 +429,9 @@ int ftc_shoot_aimed (struct physics_world *world, int index, float power, float 
     rigidbody *ch = fleet_chassis (world, r);
     if (!ch) { return -1; }
     if (!isfinite (power)) { power = 1.0f; }
-    if (power < 0.3f) { power = 0.3f; }
+    if (power < intake_launch_power_min ()) { power = intake_launch_power_min (); }
     if (power > 1.0f) { power = 1.0f; }
-    if (!isfinite (elev_deg)) { elev_deg = 50.0f; }
+    if (!isfinite (elev_deg)) { elev_deg = intake_launch_elev_default (); }
     if (elev_deg < 20.0f) { elev_deg = 20.0f; }
     if (elev_deg > 80.0f) { elev_deg = 80.0f; }
     int id = intake_shoot_aimed (world, ch -> position, ch -> orientation, ch -> velocity, r -> intake_balls,
@@ -450,7 +464,7 @@ int ftc_aim_params_set (struct physics_world *world, float power, float elev_deg
     ftc_fleet_t *f = fleet_of (world);
     if (!world || !f) { return -1; }
     if (isfinite (power)) {
-        if (power < 0.3f) { power = 0.3f; }
+        if (power < intake_launch_power_min ()) { power = intake_launch_power_min (); }
         if (power > 1.0f) { power = 1.0f; }
         f -> aim_power = power;
     }
@@ -466,6 +480,261 @@ int ftc_aim_params_get (struct physics_world *world, float *power_out, float *el
     if (!world || !f) { return -1; }
     if (power_out) { *power_out = f -> aim_power; }
     if (elev_out) { *elev_out = f -> aim_elev; }
+    return 0;
+}
+/* ---- hive-entry aim solve (see ftc_fleet.h) ---- */
+/* Coarse grid the DESPOT-2026-10-22 probe validated: the entering band is
+ * elevation 55-75 at power 0.62-0.82 for gaps 0.9-3.4 m; links clamps are
+ * the shooter's own (power 0.3-1.0, elevation 20-80), sampled densely
+ * inside that proven band plus edges. */
+static const float bbm_solve_elev [8] = {45.0f, 50.0f, 55.0f, 60.0f, 65.0f, 70.0f, 75.0f, 80.0f};
+static const float bbm_solvePow [11] = {0.40f, 0.45f, 0.50f, 0.55f, 0.60f, 0.65f, 0.70f, 0.75f, 0.80f, 0.85f,
+                                        0.90f};
+/* One candidate arc: place the carried ball in the throwaway world at
+ * (power, elevation) and march it with the real aero; entering = the ball
+ * ends the march settled INSIDE the up-cell window (the mouth is LOADED
+ * with 3 match nectar in the full world, staged by biobuzz_stage_match and
+ * mirrored into the march world by the caller: an arc whose ball crosses
+ * the plane but bounces back out on the loaded stack is NOT an entry).
+ * Scored by the settle window margin (min of the two window margins).
+ * Returns the score, or -1 on no settle. march caps at 150 ticks (~2.5 s). */
+static float bbm_march_entry (physics_world *pred, int pi, uint32_t bid, ftc_robot *r, rigidbody *ch, float power,
+                              float elev_deg, vector3 cc, vector4 cq, float ball_r) {
+    (void) r; /* carried spec picked by the caller; kept for signature symmetry with the shooter */
+    rigidbody *pb = &pred -> bodies [pi];
+    intake_launch_state lstt;
+    intake_launch_state_compute_elev (ch -> position, ch -> orientation, ch -> velocity, elev_deg, &lstt);
+    vector3 rel = vector3_subtraction (lstt.velocity, ch -> velocity);
+    pb -> position = lstt.muzzle;
+    pb -> velocity = vector3_addition (ch -> velocity, vector3_scaling (rel, power));
+    pb -> angular_velocity = vector3_scaling (lstt.spin, power);
+    rigidbody_wake (pb);
+    rigidbody_update_axes (pb);
+    vector3 cn = vector4_rotate_to_vector3 (cq, (vector3) {0.0f, 0.0f, 1.0f}); /* outward mouth normal */
+    int dbg = getenv ("MPE_HIVE_AIM_MARCH_DEBUG") != NULL; /* per-candidate trace, opt-in */
+    float tailscore = -1.0f; /* window margin at the most recent inside-window tick */
+    int inside_run = 0;      /* consecutive ticks past the plane AND inside the window */
+    for (int t = 0; t < 150; t++) {
+        int id = (bid <= (uint32_t) INT_MAX) ? (int) bid : -1;
+        if (id < 0) { break; }
+        int ids1 [1] = {id};
+        intake_balls_aero_step (pred, ids1, 1);
+        physics_world_step (pred, 1.0f / 60.0f);
+        vector3 p = pb -> position;
+        if (!isfinite (p.x) || !isfinite (p.y) || !isfinite (p.z)) { break; }
+        if (dbg && (t % 10 == 0 || t == 149)) {
+            fprintf (stderr, "  [march] t=%3d pos=(%.3f,%.3f,%.3f) v=(%.2f,%.2f,%.2f)\n", t, (double) p.x, (double) p.y,
+                     (double) p.z, (double) pb -> velocity.x, (double) pb -> velocity.y, (double) pb -> velocity.z);
+        }
+        vector3 d2 = vector3_subtraction (p, cc);
+        float ala = d2.x * cn.x + d2.y * cn.y + d2.z * cn.z;
+        /* window bookkeeping: at/inside the plane */
+        if (ala <= 0.0f) {
+            vector3 lo = biobuzz_unrotate (cq, d2);
+            float mx = BIOBUZZ_CELL_W * 0.5f - ball_r - 0.005f;
+            float my = BIOBUZZ_CELL_H * 0.5f - ball_r - 0.005f;
+            int inw = (fabsf (lo.x) <= mx && fabsf (lo.y) <= my);
+            inside_run = inw ? (inside_run + 1) : 0;
+            if (inw) {
+                float score = mx - fabsf (lo.x);
+                float score2 = my - fabsf (lo.y);
+                if (score2 < score) { score = score2; }
+                tailscore = score;
+            }
+        } else { inside_run = 0; }
+        /* early break only for a floor rest: inside the tilted cell the ball
+         * never reaches floor height (the cell sits ~1.4 m up) */
+        if (t > 10 && p.y <= ball_r * 0.6f &&
+            vector3_length_squared (pb -> velocity) < 0.05f) { break; /* settled on the floor */ }
+    }
+    if (dbg) {
+        vector3 pe = pb -> position;
+        fprintf (stderr, "  [march] verdict inside_run=%d tailscore=%.3f end=(%.3f,%.3f,%.3f)\n", inside_run,
+                 (double) tailscore, (double) pe.x, (double) pe.y, (double) pe.z);
+    }
+    if (inside_run < 10) { return -1.0f; } /* no half-second persistent settle inside */
+    return tailscore;
+}
+int ftc_aim_params_solve (struct physics_world *world, float *power_out, float *elev_out) {
+    ftc_fleet_t *f = fleet_of (world);
+    if (!world || !f || !f -> robots) { return -1; }
+    int st = f -> selected;
+    if (st < 0 || st >= f -> count) { st = 0; }
+    if (f -> count <= 0) { return -1; }
+    ftc_robot *r = &f -> robots [st];
+    if (r -> chassis_body < 0 || r -> chassis_body >= world -> body_count) { return -1; }
+    if (!f -> bb.field_built) { return -1; } /* no hive to score into */
+    rigidbody *ch = &world -> bodies [r -> chassis_body];
+    /* Muzzle + yaw key (elevation never moves the muzzle, so one compute
+     * at any elevation gets the launch origin). */
+    intake_launch_state lstt;
+    intake_launch_state_compute_elev (ch -> position, ch -> orientation, ch -> velocity, 50.0f, &lstt);
+    vector3 mz = lstt.muzzle;
+    vector3 fwd = vector4_rotate_to_vector3 (ch -> orientation, (vector3) {0.0f, 0.0f, 1.0f});
+    float cyaw = atan2f (fwd.z, fwd.x);
+    if (f -> solve_ok != 1) {
+        float ddx = mz.x - f -> solve_muzzle [0], ddy = mz.y - f -> solve_muzzle [1], ddz = mz.z - f -> solve_muzzle [2];
+        float dyf = fabsf (cyaw - f -> solve_yaw);
+        if (dyf > 3.14159265f) { dyf = 6.28318531f - dyf; }
+        /* mouth centre moves on tip re-poses: a solve for the old pose of a
+         * swung cell is wrong — check which mouth we solved for and compare
+         * its CURRENT centre against the solved one */
+        float dmx = 1e9f;
+        for (int h = 0; h < 2; h++) {
+            float mdx = f -> bb.up_mouth [h][0] - f -> solve_mouth [0];
+            float mdy = f -> bb.up_mouth [h][1] - f -> solve_mouth [1];
+            float mdz = f -> bb.up_mouth [h][2] - f -> solve_mouth [2];
+            float md = mdx * mdx + mdy * mdy + mdz * mdz;
+            if (md < dmx) { dmx = md; }
+        }
+        if (ddx * ddx + ddy * ddy + ddz * ddz < 0.35f * 0.35f && dyf < 0.09f && dmx < 0.08f * 0.08f) {
+            /* cache hit: pose held and the solved cell did not re-pose */
+            if (f -> solve_ok == -1) { return -1; }
+            if (power_out) { *power_out = f -> solve_power; }
+            if (elev_out) { *elev_out = f -> solve_elev; }
+            return 0;
+        }
+    }
+    /* Target mouth: nearest up cell for the SELECTED robot — the nose
+     * does not have to be aimed yet (the march below fails cleanly when
+     * it is not); picking by range avoids the approach-cone false
+     * negative when the robot parked at an off-axis regulation pose
+     * (LOS arrives ~40 deg off the +90 deg nose there and is still a
+     * legal single turn away). tip re-poses included via the live
+     * frame getter. */
+    int pickh = -1, pickend = 0;
+    float pickd = 1e9f;
+    float losoff = 0.0f; /* kept for the failure hint */
+    for (int h = 0; h < 2; h++) {
+        if (f -> bb.field_built != 1) { continue; }
+        vector3 cc; vector4 cq;
+        int ue = f -> bb.tilt [h];
+        if (biobuzz_up_cell_frame (h, ue, &cc, &cq) != 0) { continue; }
+        float dx = cc.x - mz.x;
+        float dz = cc.z - mz.z;
+        float lyaw = atan2f (dz, dx); /* chassis-yaw convention atan2(z,x)! */
+        float dyy = lyaw - cyaw;
+        while (dyy > 3.14159265f) { dyy -= 6.28318531f; }
+        while (dyy < -3.14159265f) { dyy += 6.28318531f; }
+        float dist = dx * dx + dz * dz;
+        if (dist < pickd) { pickd = dist; pickh = h; pickend = ue; losoff = dyy; }
+    }
+    if (pickh < 0) {
+        fprintf (stderr, "[hive-aim] no up-cell mouth staged (field_built=%d)\n", (int) f -> bb.field_built);
+        f -> solve_ok = -1;
+        f -> solve_muzzle [0] = mz.x; f -> solve_muzzle [1] = mz.y; f -> solve_muzzle [2] = mz.z;
+        f -> solve_yaw = cyaw;
+        f -> solve_mouth [0] = 0.0f; f -> solve_mouth [1] = -1000.0f; f -> solve_mouth [2] = 0.0f;
+        return -1;
+    }
+    vector3 cc; vector4 cq;
+    if (biobuzz_up_cell_frame (pickh, pickend, &cc, &cq) != 0) { return -1; }
+    /* Carried ball spec — falls back to the regulation pollen when the
+     * intake is empty (aim geometry is independent of the payload; the
+     * shooter simply has nothing to fire). */
+    int bi = (r -> intake_count > 0) ? physics_world_index_by_id (world, (uint32_t) r -> intake_balls [0]) : -1;
+    float brad = (bi >= 0 && isfinite (world -> bodies [bi].radius) && world -> bodies [bi].radius > 0.001f)
+                     ? world -> bodies [bi].radius : BIOBUZZ_POLLEN_RADIUS;
+    float bmass = (bi >= 0 && isfinite (world -> bodies [bi].mass) && world -> bodies [bi].mass > 0.0f)
+                      ? world -> bodies [bi].mass : BIOBUZZ_POLLEN_MASS;
+    float brest = (bi >= 0) ? world -> bodies [bi].restitution : 0.65f;
+    float bfst = (bi >= 0) ? world -> bodies [bi].friction_static : 0.45f;
+    float bfkn = (bi >= 0) ? world -> bodies [bi].friction_kinetic : 0.35f;
+    /* Throwaway world + statics mirror (same filter as ftc_traj) + ONE
+     * ball reset per candidate: statics copy is the expensive half. */
+    physics_world pred;
+    physics_world_init (&pred);
+    constraint_pool_init (&pred);
+    mpe_config_t pcf = *mpe_world_cfg (world);
+    pcf.timestep.solver_iterations = 8;
+    physics_world_set_config (&pred, &pcf);
+    if (world -> static_plane_enabled) {
+        pred.static_plane_enabled = true;
+        pred.static_plane_body = world -> static_plane_body;
+    }
+    for (int ib = 0; ib < world -> body_count; ib++) {
+        rigidbody *b = &world -> bodies [ib];
+        if (!((b -> static_state || b -> mass == 0.0f) && !b -> kinematic && !b -> no_collide)) { continue; }
+        int di = -1;
+        if (b -> type == object_cube) {
+            di = physics_world_add_cube (&pred, b -> position, b -> half_extensions, 0.0f);
+        } else if (b -> type == object_sphere) {
+            di = physics_world_add_sphere (&pred, b -> radius, 0.0f, b -> position);
+        } else if (b -> type == object_cylinder) {
+            di = physics_world_add_cylinder (&pred, b -> radius, b -> cylinder_half_length, 0.0f, b -> position);
+        }
+        if (di < 0) { continue; }
+        rigidbody *db = &pred.bodies [di];
+        db -> static_state = true;
+        db -> inverse_mass = 0.0f;
+        db -> friction_static = b -> friction_static;
+        db -> friction_kinetic = b -> friction_kinetic;
+        db -> restitution = b -> restitution;
+        db -> orientation = b -> orientation;
+        rigidbody_update_axes (db);
+    }
+    int pi = physics_world_add_sphere (&pred, brad, bmass, (vector3) {0.0f, -50.0f, 0.0f});
+    if (pi >= 0) {
+        rigidbody *pb = &pred.bodies [pi];
+        pb -> restitution = brest;
+        pb -> friction_static = bfst;
+        pb -> friction_kinetic = bfkn;
+        rigidbody_wake (pb);
+        rigidbody_update_axes (pb);
+    }
+    float bestscore = -1.0f;
+    float bp = 0.0f, be = 0.0f;
+    /* Mouth occupants: the staged match seats 3 nectar against the cell's
+     * back wall (biobuzz_stage_match, Manual §10.3.1). The march must see
+     * the SAME mouth: an arc that would bounce back out on the loaded stack
+     * is not an entry. Same spec as the fleet's own balls. */
+    {
+        int side = (pickh == 0) ? -1 : 1;
+        for (int k = 0; k < BIOBUZZ_CELL_NECTAR; k++) {
+            vector3 loc = {side * 0.10f - side * (float) k * 0.095f, -0.10f,
+                           -BIOBUZZ_CELL_D * 0.5f + BIOBUZZ_NECTAR_RADIUS + 0.005f};
+            vector3 off = vector4_rotate_to_vector3 (cq, loc);
+            vector3 p = {cc.x + off.x, cc.y + off.y, cc.z + off.z};
+            int oi = physics_world_add_sphere (&pred, BIOBUZZ_NECTAR_RADIUS, BIOBUZZ_NECTAR_MASS, p);
+            if (oi >= 0) {
+                rigidbody *ob = &pred.bodies [oi];
+                ob -> restitution = INTAKE_BALL_RESTITUTION;
+                ob -> friction_static = INTAKE_BALL_FRICTION_S;
+                ob -> friction_kinetic = INTAKE_BALL_FRICTION_K;
+                rigidbody_wake (ob);
+                rigidbody_update_axes (ob);
+            }
+        }
+    }
+    if (pi >= 0 && pred.bodies [pi].object_id <= (uint32_t) INT_MAX) {
+        /* Steepest-first: the first entering arc is the highest elevation
+         * row that drops inside — flat arcs that scrape the mouth's
+         * underside (the "firing at the belly" complaint) are skipped even
+         * if the march accepts them. */
+        for (int ei = 7; ei >= 0 && bestscore < 0.0f; ei--) {
+            for (int qi = 0; qi < 11 && bestscore < 0.0f; qi++) {
+                float sc = bbm_march_entry (&pred, pi, pred.bodies [pi].object_id, r, ch, bbm_solvePow [qi],
+                                            bbm_solve_elev [ei], cc, cq, brad);
+                if (sc > bestscore) { bestscore = sc; bp = bbm_solvePow [qi]; be = bbm_solve_elev [ei]; }
+            }
+        }
+    }
+    physics_world_cleanup (&pred);
+    f -> solve_muzzle [0] = mz.x; f -> solve_muzzle [1] = mz.y; f -> solve_muzzle [2] = mz.z;
+    f -> solve_yaw = cyaw;
+    f -> solve_mouth [0] = cc.x; f -> solve_mouth [1] = cc.y; f -> solve_mouth [2] = cc.z;
+    if (bestscore < 0.0f) {
+        fprintf (stderr, "[hive-aim] no entering arc from this muzzle (%.2f,%.2f,%.2f): LOS azimuth is %.0f deg off the nose — yaw toward the mouth (up mouths face outboard: red -Z approach, blue +Z)\n",
+                 (double) mz.x, (double) mz.y, (double) mz.z, (double) (losoff * 57.2958f));
+        f -> solve_ok = -1;
+        return -1;
+    }
+    f -> solve_ok = 0;
+    f -> solve_power = bp;
+    f -> solve_elev = be;
+    fprintf (stderr, "[hive-aim] solved power=%.2f elev=%.0f deg\n", (double) bp, (double) be);
+    if (power_out) { *power_out = bp; }
+    if (elev_out) { *elev_out = be; }
     return 0;
 }
 /* Suspended bucket: a miniature walled field pad (floor + 4 walls, open
@@ -681,14 +950,53 @@ static void ftc_game_update (struct physics_world *world, ftc_fleet_t *f, float 
         rigidbody *ch = fleet_chassis (world, r);
         if (!ch) { continue; }
         if (r -> intake_on || r -> intake_count > 0) {
-            intake_update (world, ch -> position, ch -> orientation, ch -> velocity, r -> intake_on,
-                           r -> intake_balls, &r -> intake_count, f -> ball_ids, f -> ball_count);
-            /* BIOBUZZ registry: same mouth, same possession (carried cap 4
-             * == regulation preload max). Arcade registry untouched. */
-            if (f -> bb.piece_count > 0) {
-                intake_update (world, ch -> position, ch -> orientation, ch -> velocity, r -> intake_on,
-                               r -> intake_balls, &r -> intake_count, f -> bb.piece_ids, f -> bb.piece_count);
+            /* Build one deduplicated candidate list so ordinary balls and
+             * BIOBUZZ pieces compete for the same four possession slots.
+             * Preserve the source registries: they still own their scoring
+             * and lifecycle metadata. */
+            int intake_candidates [INTAKE_MAX_BALLS + BIOBUZZ_MAX_PIECES];
+            int intake_candidate_n = 0;
+            for (int k = 0; k < f -> ball_count && k < INTAKE_MAX_BALLS && intake_candidate_n < INTAKE_MAX_BALLS + BIOBUZZ_MAX_PIECES; k++) {
+                int id = f -> ball_ids [k];
+                if (id < 0) { continue; }
+                int seen = 0;
+                for (int j = 0; j < intake_candidate_n; j++) {
+                    if (intake_candidates [j] == id) { seen = 1; break; }
+                }
+                if (!seen) { intake_candidates [intake_candidate_n++] = id; }
             }
+            for (int k = 0; k < f -> bb.piece_count && k < BIOBUZZ_MAX_PIECES && intake_candidate_n < INTAKE_MAX_BALLS + BIOBUZZ_MAX_PIECES; k++) {
+                int id = f -> bb.piece_ids [k];
+                if (id < 0) { continue; }
+                int seen = 0;
+                for (int j = 0; j < intake_candidate_n; j++) {
+                    if (intake_candidates [j] == id) { seen = 1; break; }
+                }
+                if (!seen) { intake_candidates [intake_candidate_n++] = id; }
+            }
+            /* Stable nearest-first ordering: intake_update captures in list
+             * order, so registry insertion history no longer decides which
+             * nearby pieces win when capacity is limited. */
+            vector3 intake_mc;
+            intake_mouth_pose (ch -> position, ch -> orientation, &intake_mc, NULL);
+            for (int a = 0; a < intake_candidate_n; a++) {
+                int best = a;
+                float best_d2 = INFINITY;
+                for (int b = a; b < intake_candidate_n; b++) {
+                    int bi = physics_world_index_by_id (world, (uint32_t) intake_candidates [b]);
+                    if (bi < 0 || bi >= world -> body_count) { continue; }
+                    vector3 d = vector3_subtraction (world -> bodies [bi].position, intake_mc);
+                    float d2 = vector3_length_squared (d);
+                    if (isfinite (d2) && d2 < best_d2) { best_d2 = d2; best = b; }
+                }
+                if (best != a) {
+                    int tmp = intake_candidates [a];
+                    intake_candidates [a] = intake_candidates [best];
+                    intake_candidates [best] = tmp;
+                }
+            }
+            intake_update (world, ch -> position, ch -> orientation, ch -> velocity, r -> intake_on,
+                           r -> intake_balls, &r -> intake_count, intake_candidates, intake_candidate_n);
             intake_carry_step (world, ch -> position, ch -> orientation, ch -> velocity, r -> intake_balls,
                                r -> intake_count);
         } else {

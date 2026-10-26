@@ -37,6 +37,8 @@ extern int mfs_t_biobuzz_stage (void);
 extern int mfs_t_biobuzz_tip (void);
 extern int mfs_t_biobuzz_flower (void);
 extern int mfs_t_biobuzz_table (void);
+extern int mfs_t_aim_solve (void);
+extern int mfs_t_module_config (void);
 extern int mfs_t_select (void);
 extern int mfs_t_yaw_stability (void);
 extern int mfs_t_fleet_clear (void);
@@ -68,6 +70,8 @@ static const mfs_test_entry_t registry [] = {
     {"biobuzz_tip", mfs_t_biobuzz_tip, false},
     {"biobuzz_flower", mfs_t_biobuzz_flower, false},
     {"biobuzz_table", mfs_t_biobuzz_table, false},
+    {"aim_solve", mfs_t_aim_solve, false},
+    {"module_config", mfs_t_module_config, false},
     {"select", mfs_t_select, false},
     {"yaw_stability", mfs_t_yaw_stability, false},
     {"fleet_clear", mfs_t_fleet_clear, false},
